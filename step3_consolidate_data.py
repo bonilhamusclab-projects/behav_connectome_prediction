@@ -43,7 +43,7 @@ def _prep_df(df):
 def load_x_csv(csv_path):
     df = _prep_df(pd.read_csv(csv_path, header=None))
     df = df.T
-    df['id'] = os.path.basename(csv_path)[:-4]
+    df.index = [os.path.basename(csv_path)[:-4]]
     return df
 
 
@@ -68,18 +68,18 @@ def consolidate_x(csv_dir="data/step1/", dest_path="data/step3/X.csv"):
 def consolidate(y_src="data/step2/outcomes.csv",
                 x_src="data/step3/X.csv",
                 dest_path="data/step3/full.csv"):
-    x = pd.read_csv(x_src)
+    x = pd.read_csv(x_src, index_col=0)
     y = pd.read_csv(y_src)
-    full = pd.merge(x, y, on='id', how='inner')
+    full = pd.merge(x, y, right_on='id', left_index=True, how='inner')
 
     max_num_rows = np.min((x.shape[0], y.shape[0]))
-    num_cols = x.shape[1] + y.shape[1] - 1
+    num_cols = x.shape[1] + y.shape[1]
 
     assert full.shape[0] <= max_num_rows
     assert full.shape[1] == num_cols
 
     if dest_path:
-        full.to_csv(dest_path)
+        full.to_csv(dest_path, index=False)
 
     return full
 
