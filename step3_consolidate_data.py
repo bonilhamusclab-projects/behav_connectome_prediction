@@ -2,6 +2,7 @@ from __future__ import division
 
 import os
 
+import numpy as np
 import pandas as pd
 
 
@@ -39,17 +40,48 @@ def _prep_df(df):
     return ret
 
 
-def consolidate(csv_dir, excel_path):
+def load_x_csv(csv_path):
+    df = _prep_df(pd.read_csv(csv_path, header=None))
+    df = df.T
+    df['id'] = os.path.basename(csv_path)[:-4]
+    return df
 
-    def prep_df(csv):
-        df = _prep_df(pd.read_csv(os.path.join(csv_dir, csv), header=None))
-        df = df.T
-        df['id'] = csv[:-4]
 
-    dfs = pd.concat([prep_df(c) for c in os.listdir(csv_dir)], axis=1)
-    assert dfs.shape[0] < dfs.shape[1]
+def consolidate_x(csv_dir="data/step1/", dest_path="data/step3/X.csv"):
+    fs = os.listdir(csv_dir)
+    num_fs = len(fs)
+
+    def load(csv, wait=dict(wait=0)):
+        wait['wait'] += 1
+        print "%s out of %s" % (wait['wait'], num_fs)
+        return load_x_csv(os.path.join(csv_dir, csv))
+
+    dfs = pd.concat([load(c) for c in fs], axis=0)
+    assert dfs.shape[0] == num_fs
+
+    if dest_path:
+        dfs.to_csv(dest_path)
 
     return dfs
+
+
+def consolidate(y_src="data/step2/outcomes.csv",
+                x_src="data/step3/X.csv",
+                dest_path="data/step3/full.csv"):
+    x = pd.read_csv(x_src)
+    y = pd.read_csv(y_src)
+    full = pd.merge(x, y, on='id', how='inner')
+
+    max_num_rows = np.min((x.shape[0], y.shape[0]))
+    num_cols = x.shape[1] + y.shape[1] - 1
+
+    assert full.shape[0] <= max_num_rows
+    assert full.shape[1] == num_cols
+
+    if dest_path:
+        full.to_csv(dest_path)
+
+    return full
 
 
 def _test():
