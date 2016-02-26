@@ -1,16 +1,15 @@
 from __future__ import division
 
 from collections import namedtuple
-import math
 import sys
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 from scipy.stats import gamma
-from sklearn.cross_validation import KFold, ShuffleSplit
+from sklearn.cross_validation import ShuffleSplit
 from sklearn.grid_search import RandomizedSearchCV
-from sklearn.metrics import f1_score, mean_squared_error, make_scorer, r2_score
+from sklearn.metrics import f1_score, make_scorer, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.svm import LinearSVR
 
@@ -42,64 +41,6 @@ def separate(full, target_col):
     data = full.loc[indices, data_cols]
 
     return data, target
-
-
-class CvInfo:
-    def __init__(self, expected_mat, predicted_mat):
-        self.expected_mat = expected_mat
-        self.predicted_mat = predicted_mat
-        self.expected_predicted_paired = zip(expected_mat, predicted_mat)
-
-    def _compare(self, fn):
-        return [fn(expected, predicted)
-                for expected, predicted in self.expected_predicted_paired]
-
-    def root_mean_square_errors(self):
-        return self._compare(lambda e, p: math.sqrt(mean_squared_error(e, p)))
-
-    def avg_rmse(self):
-        return np.average(self.root_mean_square_errors())
-
-    def __repr__(self):
-        new_line = lambda s, v: s.format(v) + "\n"
-
-        return (new_line("root-mean-square-error scores: {}", self.root_mean_square_errors()) +
-                new_line("avg root-mean-square-error: {}", self.avg_rmse()))
-
-
-def verbose_cv(mat, labels, alg, n_folds=3, verbose=True, cv=None):
-    if cv is None:
-        cv = KFold(labels, n_folds=n_folds)
-
-    expected_mat = []
-    predicted_mat = []
-
-    expected_mat_train = []
-    predicted_mat_train = []
-
-    def print_v(s):
-        if verbose:
-            print s
-
-    for train, test in cv:
-        expected = labels[test]
-        print_v("train labels")
-        print_v(labels[train])
-        print_v("test labels")
-        print_v(expected)
-        print_v("about to fit")
-        alg.fit(mat[train], labels[train])
-        print_v("about to predict")
-        predicted = alg.predict(mat[test])
-        print('####')
-
-        expected_mat.append(expected)
-        predicted_mat.append(predicted)
-
-        expected_mat_train.append(labels[train])
-        predicted_mat_train.append(alg.predict(mat[train]))
-
-    return CvInfo(expected_mat, predicted_mat), CvInfo(expected_mat_train, predicted_mat_train)
 
 
 def verbose_scorer(total_runs, score_fn=f1_score):
