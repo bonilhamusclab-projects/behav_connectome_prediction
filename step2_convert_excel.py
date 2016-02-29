@@ -1,13 +1,17 @@
 from __future__ import division
 
+import os
 import re
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 
 
 def valid_id(id):
     """
+    :param id: string to be tested if is valid id
+    :returns: boolean indicated if id is valid
     >>> from step2_convert_excel import valid_id
     >>> valid_id("M1234")
     True
@@ -24,40 +28,61 @@ def valid_id(id):
         return False
 
 
-def convert_excel(src_file, dest_path):
+def convert_excel(src_file, dest_dir):
     excel = pd.read_excel(src_file, 'Data')
 
     column_mappings = {
         'img ': 'id',
-        'PD AVG TRW': 'pd_avg_total_words',
-        'PD AVG TDW': 'pd_avg_total_different_words',
-        'AverageTotalWords': 'avg_total_words',
-        'AverageDifferentWords': 'avg_different_words'
+        'PD AVG TRW': 'pd_atw',
+        'PD AVG TDW': 'pd_adw',
+        'AverageTotalWords': 'se_atw',
+        'AverageDifferentWords': 'se_adw'
     }
 
     data = excel[column_mappings.keys()]
 
     data.rename(columns=column_mappings, inplace=True)
 
-    def float_or_null(i):
+    def float_or_nan(i):
         try:
             return float(i)
         except:
             return np.NaN
 
-    numeric_cols = ['pd_avg_total_words',
-                    'pd_avg_total_different_words',
-                    'avg_total_words',
-                    'avg_different_words']
-
-    for c in numeric_cols:
-        data[c] = [float_or_null(i) for i in data[c]]
-
     valid_indices = [valid_id(i) for i in data['id']]
     data = data.loc[valid_indices, :]
 
-    data.to_csv(dest_path, index=False)
-    return data
+    numeric_cols = set(column_mappings.values()) - {'id'}
+
+    for c in numeric_cols:
+        data[c] = [float_or_nan(i) for i in data[c]]
+
+    base_cols = {n[3:] for n in numeric_cols}
+
+    def not_nan(arr):
+        return np.logical_not(np.isnan(arr))
+
+    ret = dict()
+
+    for c in base_cols:
+        def prepend(k): return k + "_" + c
+
+        def n_nan(k): return not_nan(data[prepend(k)])
+
+        valid_rows = np.logical_and(n_nan('se'), n_nan('pd'))
+        df = data.loc[valid_rows, ['id'] + [prepend(k) for k in ['se', 'pd']]]
+
+        pd_z = 'pd_' + c + '_z'
+        se_z = 'se_' + c + '_z'
+        df[pd_z] = stats.zscore(df[pd_z[:-2]])
+        df[se_z] = stats.zscore(df[se_z[:-2]])
+        df[c + '_z'] = df[se_z] - df[pd_z]
+
+        dest_f = os.path.join(dest_dir, c+'_outcomes.csv')
+        df.to_csv(dest_f, index=False)
+        ret[c] = df
+
+    return ret
 
 
 def _test():

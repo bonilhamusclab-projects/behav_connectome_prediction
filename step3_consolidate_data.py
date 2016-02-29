@@ -65,23 +65,30 @@ def consolidate_x(csv_dir="data/step1/", dest_path="data/step3/X.csv"):
     return dfs
 
 
-def consolidate(y_src="data/step2/outcomes.csv",
+def consolidate(y_dir="data/step2/",
                 x_src="data/step3/X.csv",
-                dest_path="data/step3/full.csv"):
+                dest_dir="data/step3/"):
     x = pd.read_csv(x_src, index_col=0)
-    y = pd.read_csv(y_src)
-    full = pd.merge(x, y, right_on='id', left_index=True, how='inner')
 
-    max_num_rows = np.min((x.shape[0], y.shape[0]))
-    num_cols = x.shape[1] + y.shape[1]
+    ret = dict()
+    for yo in ['adw', 'atw']:
+        y_src = os.path.join(y_dir, yo+'_outcomes.csv')
+        y = pd.read_csv(y_src)
+        full = pd.merge(x, y, right_on='id', left_index=True, how='inner')
 
-    assert full.shape[0] <= max_num_rows
-    assert full.shape[1] == num_cols
+        max_num_rows = np.min((x.shape[0], y.shape[0]))
+        num_cols = x.shape[1] + y.shape[1]
 
-    if dest_path:
-        full.to_csv(dest_path, index=False)
+        assert full.shape[0] <= max_num_rows
+        assert full.shape[1] == num_cols
 
-    return full
+        if dest_dir:
+            dest_path = os.path.join(dest_dir, 'full_%s.csv' % yo)
+            full.to_csv(dest_path, index=False)
+
+        ret[yo] = full
+
+    return ret
 
 
 def _test():
