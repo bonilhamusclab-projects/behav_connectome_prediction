@@ -8,9 +8,9 @@ import pandas as pd
 from scipy import stats
 
 
-def valid_id(id):
+def valid_id(id_str):
     """
-    :param id: string to be tested if is valid id
+    :param id_str: string to be tested if is valid id
     :returns: boolean indicated if id is valid
     >>> from step2_convert_excel import valid_id
     >>> valid_id("M1234")
@@ -22,8 +22,8 @@ def valid_id(id):
     False
 
     """
-    if isinstance(id, basestring):
-        return re.match(r"M[0-9]{3,4}", id) is not None
+    if isinstance(id_str, basestring):
+        return re.match(r"M[0-9]{3,4}", id_str) is not None
     else:
         return False
 
@@ -43,10 +43,10 @@ def convert_excel(src_file, dest_dir):
 
     data.rename(columns=column_mappings, inplace=True)
 
-    def float_or_nan(i):
+    def float_or_nan(val):
         try:
-            return float(i)
-        except:
+            return float(val)
+        except ValueError:
             return np.NaN
 
     valid_indices = [valid_id(i) for i in data['id']]
@@ -65,9 +65,9 @@ def convert_excel(src_file, dest_dir):
     ret = dict()
 
     for c in base_cols:
-        def prepend(k): return k + "_" + c
+        def prepend(test_type): return test_type + "_" + c
 
-        def n_nan(k): return not_nan(data[prepend(k)])
+        def n_nan(test_type): return not_nan(data[prepend(test_type)])
 
         valid_rows = np.logical_and(n_nan('se'), n_nan('pd'))
         df = data.loc[valid_rows, ['id'] + [prepend(k) for k in ['se', 'pd']]]
