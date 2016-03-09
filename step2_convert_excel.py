@@ -28,7 +28,7 @@ def valid_id(id_str):
         return False
 
 
-def convert_excel(src_file, dest_dir):
+def convert_excel(src_file, dest_dir='data/step2/'):
     excel = pd.read_excel(src_file, 'Data')
 
     column_mappings = {
@@ -77,6 +77,8 @@ def convert_excel(src_file, dest_dir):
         df[pd_z] = stats.zscore(df[pd_z[:-2]])
         df[se_z] = stats.zscore(df[se_z[:-2]])
         df[c + '_z'] = df[se_z] - df[pd_z]
+
+        df[c + '_diff_wpm'] = df[prepend('se')] * 2 - df[prepend('pd')]
 
         dest_f = os.path.join(dest_dir, c+'_outcomes.csv')
         df.to_csv(dest_f, index=False)

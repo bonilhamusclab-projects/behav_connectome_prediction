@@ -20,7 +20,7 @@ def is_data_col(c):
     try:
         int(front)
         return True
-    except:
+    except ValueError:
         return False
 
 
