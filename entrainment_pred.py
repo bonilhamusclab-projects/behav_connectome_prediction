@@ -12,6 +12,7 @@ from sklearn.cross_validation import ShuffleSplit
 from sklearn.grid_search import RandomizedSearchCV
 from sklearn.metrics import f1_score, make_scorer, r2_score
 from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import scale
 from sklearn.svm import LinearSVR, LinearSVC
 
 
@@ -54,17 +55,22 @@ def verbose_scorer(total_runs, score_fn=f1_score):
     return make_scorer(verbose_score_fn)
 
 
-def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100):
+def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100, normalize=False):
 
     svr = LinearSVR()
+    
+    pipeline_steps = [('svr', svr)]
 
-    pipeline = Pipeline([('svr', svr)])
+    pipeline = Pipeline(pipeline_steps)
 
     c_range = gamma.rvs(size=c_range_size, a=c_range_alpha, random_state=random_state)
 
     param_dist = {"svr__C": c_range}
 
     data, target = separate(full, target_col)
+    
+    if normalize:
+        data = scale(data)
 
     n_iter = 100
     cv = ShuffleSplit(len(target), n_iter=n_iter, test_size=1/6.0, random_state=random_state)
