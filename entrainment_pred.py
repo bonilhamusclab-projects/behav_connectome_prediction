@@ -8,12 +8,36 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 from scipy.stats import gamma
-from sklearn.cross_validation import ShuffleSplit
+from sklearn.cross_validation import permutation_test_score, ShuffleSplit
 from sklearn.grid_search import RandomizedSearchCV
 from sklearn.metrics import f1_score, make_scorer, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import scale
 from sklearn.svm import LinearSVR, LinearSVC
+
+
+# Based on:
+# http://stackoverflow.com/questions/27928275/find-p-value-significance-in-scikit-learn-linearregression
+class LinearSVRPermuteCoef(LinearSVR):
+    def __init__(self, **kwargs):
+        self.permute_max_coefs = []
+        self.permute_min_coefs = []
+        super(LinearSVR, self).__init__(**kwargs)
+
+    def fit(self, X, y, n_jobs=1):
+        self = super(LinearSVR, self).fit(X, y, n_jobs)
+
+        def add_coef(arr, fn):
+            arr.append(fn(self.coef_))
+
+        add_coef(self.permute_max_coefs, np.max)
+        add_coef(self.permute_min_coefs, np.min)
+
+        return self
+
+    def resert_perm_coefs(self):
+        self.permute_max_coefs = []
+        self.permute_min_coefs = []
 
 
 def is_data_col(c):
@@ -55,9 +79,68 @@ def verbose_scorer(total_runs, score_fn=f1_score):
     return make_scorer(verbose_score_fn)
 
 
+def search_all():
+    import logging
+    logging.basicConfig(filename='search_results.log', level=logging.DEBUG)
+
+    data_types = {'atw': ['z', 'diff_wpm'],
+                  'adw': ['z']}
+    for data_type in data_types:
+        full = pd.read_csv("data/step3/full_%s.csv" % data_type)
+        for target_col in data_types[data_type]:
+            target_col = data_type + '_' + target_col
+            print("about to process: %s" % target_col)
+
+            logging.info("results for %s" % target_col)
+
+            search = run(full, target_col)
+            search_normalize = run(full, target_col, normalize=True)
+
+            (search, normalized) = (search, "no") if search.best_score > search_normalize.best_score \
+                else (search_normalize, "yes")
+
+            logging.info("normalized: %s" % normalized)
+
+            logging.info("best score: %s" % search.best_score_)
+            logging.info("best params: %s" % search.best_params_)
+
+            data, target = separate(full, target_col)
+
+            best_svr = search.best_estimator_.named_steps['svr']
+            best_svr.resert_perm_coefs()
+
+            def save_csv(desc, arr):
+                np.savetxt('%s_%s.csv' % (target_col, desc), arr, delimiter=',')
+
+            save_csv('best_coefs', best_svr.coef_)
+
+            score, permutation_pred_scores, p_value = permutation_test_score(
+                search.best_estimator_,
+                data, target,
+                scoring=search.scoring,
+                cv=search.cv,
+                n_permutations=100
+            )
+
+            logging.info("best score perms: %s" % score)
+
+            save_csv('permute_pred_scores', permutation_pred_scores)
+            save_csv('permute_max_coefs', best_svr.permute_max_coefs)
+            save_csv('permute_min_coefs', best_svr.permute_min_coefs)
+
+            logging.info("p-value: %s" % p_value)
+            if p_value >= .05:
+                logging.warn("p_value of %s >= .05")
+
+            learning_curve_title = "%s Learning Curve" % target_col
+            plot_learning_curve(search.best_estimator_,
+                                learning_curve_title, X, y,
+                                f_name=learning_curve_title.replace(' ', '_') + '.png')
+
+
 def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100, normalize=False):
 
-    svr = LinearSVR()
+    svr = LinearSVRPermuteCoef()
     
     pipeline_steps = [('svr', svr)]
 
@@ -141,7 +224,8 @@ def ttest_1samp_one_tail(test_arr, mu0):
 
 
 def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
-                        n_jobs=1, train_sizes=np.linspace(.1, 1.0, 5)):
+                        n_jobs=1, train_sizes=np.linspace(.1, 1.0, 5),
+                        f_name=None):
     """
     Generate a simple plot of the test and traning learning curve.
 
@@ -171,6 +255,10 @@ def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
 
     n_jobs : integer, optional
         Number of jobs to run in parallel (default 1).
+
+    f_name: string, optional
+        default None
+        name of file to save plot to (if set)
     """
     from sklearn.learning_curve import learning_curve
 
@@ -200,6 +288,9 @@ def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
              label="Cross-validation score")
 
     plt.legend(loc="best")
+
+    if f_name is not None:
+        plt.savefig(f_name)
 
     return np.max(train_scores_mean), np.max(test_scores_mean)
 
