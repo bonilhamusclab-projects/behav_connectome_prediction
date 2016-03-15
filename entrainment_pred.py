@@ -17,45 +17,54 @@ from sklearn.preprocessing import scale
 from sklearn.svm import LinearSVR, LinearSVC
 
 
-class LinearSVRPermuteCoef():
-    def __init__(self, **kwargs):
-        self.model = LinearSVR(**kwargs)
-        self.permute_max_coefs = []
-        self.permute_min_coefs = []
+def linearSVRPermuteCoefFactory():
+    coeffs_state = {'min': [], 'max': []}
 
-    def fit(self, X, y):
-        self.model.fit(X, y)
+    class LinearSVRPermuteCoef:
+        def __init__(self, **kwargs):
+            self.model = LinearSVR(**kwargs)
 
-        self.coef_ = self.model.coef_
-        self.intercept_ = self.model.intercept_
+        def fit(self, X, y):
+            self.model.fit(X, y)
 
-        def add_coef(arr, fn):
-            arr.append(fn(self.model.coef_))
+            self.coef_ = self.model.coef_
+            self.intercept_ = self.model.intercept_
 
-        add_coef(self.permute_max_coefs, np.max)
-        add_coef(self.permute_min_coefs, np.min)
+            def add_coef(arr, fn):
+                arr.append(fn(self.coef_))
 
-        return self
+            add_coef(coeffs_state['max'], np.max)
+            add_coef(coeffs_state['min'], np.min)
 
-    def reset_perm_coefs(self):
-        self.permute_max_coefs = []
-        self.permute_min_coefs = []
+            return self
 
-    def get_params(self, deep=True):
-        return self.model.get_params(deep)
+        def get_params(self, deep=True):
+            return self.model.get_params(deep)
 
-    def set_params(self, **kwargs):
-        self.model.set_params(**kwargs)
-        return self
-    
-    def predict(self, X):    
-        return self.model.predict(X)
+        def set_params(self, **kwargs):
+            self.model.set_params(**kwargs)
+            return self
 
-    def score(self, X, y, sample_weight=None):
-        if sample_weight is not None:
-            return self.model.score(X, y, sample_weight)
-        else:
-            return self.model.score(X, y)
+        def predict(self, X):
+            return self.model.predict(X)
+
+        def score(self, X, y, sample_weight=None):
+            if sample_weight is not None:
+                return self.model.score(X, y, sample_weight)
+            else:
+                return self.model.score(X, y)
+
+        def permute_min_coefs(self):
+            return coeffs_state['min']
+
+        def permute_max_coefs(self):
+            return coeffs_state['max']
+
+        def reset_perm_coefs(self):
+            coeffs_state['min'] = []
+            coeffs_state['max'] = []
+
+    return LinearSVRPermuteCoef()
 
 
 def is_data_col(c):
@@ -145,8 +154,8 @@ def search_all():
             logger.info("best score perms: %s" % score)
 
             save_csv('permute_pred_scores', permutation_pred_scores)
-            save_csv('permute_max_coefs', best_svr.permute_max_coefs)
-            save_csv('permute_min_coefs', best_svr.permute_min_coefs)
+            save_csv('permute_max_coefs', best_svr.permute_max_coefs())
+            save_csv('permute_min_coefs', best_svr.permute_min_coefs())
 
             logger.info("p-value: %s" % p_value)
             if p_value >= .05:
@@ -161,10 +170,9 @@ def search_all():
             save_csv("learning_curve_test_scores", test_scores)
 
 
-
 def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100, normalize=False):
 
-    svr = LinearSVRPermuteCoef()
+    svr = linearSVRPermuteCoefFactory()
     
     pipeline_steps = [('svr', svr)]
 
