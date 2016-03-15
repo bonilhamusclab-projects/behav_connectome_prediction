@@ -152,7 +152,8 @@ def search_all():
 
             learning_curve_title = "%s Learning Curve" % target_col
             plot_learning_curve(search.best_estimator_,
-                                learning_curve_title, X, y,
+                                learning_curve_title, 
+                                data.get_values(), target.get_values(),
                                 f_name=learning_curve_title.replace(' ', '_') + '.png')
 
 
