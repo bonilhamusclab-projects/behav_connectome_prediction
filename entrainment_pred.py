@@ -76,7 +76,7 @@ def separate_cols(full):
 def separate(full, target_col):
     data_cols, y_cols = separate_cols(full)
 
-    assert target_col in y_cols
+    assert target_col in y_cols, "%s not in cols" % target_col
 
     target = full.loc[:, target_col]
     indices = pd.notnull(target)
@@ -148,9 +148,9 @@ def search_all():
             save_csv('permute_max_coefs', best_svr.permute_max_coefs)
             save_csv('permute_min_coefs', best_svr.permute_min_coefs)
 
-            logging.info("p-value: %s" % p_value)
+            logger.info("p-value: %s" % p_value)
             if p_value >= .05:
-                logging.warn("p_value of %s >= .05")
+                logger.warn("p_value of %s >= .05")
 
             train_sizes, train_scores, test_scores = learning_curve(
                 search.best_estimator_,
