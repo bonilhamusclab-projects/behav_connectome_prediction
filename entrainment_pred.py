@@ -10,6 +10,7 @@ from scipy import stats
 from scipy.stats import gamma
 from sklearn.cross_validation import permutation_test_score, ShuffleSplit
 from sklearn.grid_search import RandomizedSearchCV
+from sklearn.learning_curve import learning_curve
 from sklearn.metrics import f1_score, make_scorer, r2_score
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import scale
@@ -107,8 +108,9 @@ def search_all():
         for target_col in data_types[data_type]:
             target_col = data_type + '_' + target_col
             print("about to process: %s" % target_col)
+            logger = logging.getLogger(target_col)
 
-            logging.info("results for %s" % target_col)
+            logger.info("results for %s" % target_col)
 
             search = run(full, target_col)
             search_normalize = run(full, target_col, normalize=True)
@@ -116,10 +118,10 @@ def search_all():
             (search, normalized) = (search, "no") if search.best_score_ > search_normalize.best_score_ \
                 else (search_normalize, "yes")
 
-            logging.info("normalized: %s" % normalized)
+            logger.info("normalized: %s" % normalized)
 
-            logging.info("best score: %s" % search.best_score_)
-            logging.info("best params: %s" % search.best_params_)
+            logger.info("best score: %s" % search.best_score_)
+            logger.info("best params: %s" % search.best_params_)
 
             data, target = separate(full, target_col)
 
@@ -140,7 +142,7 @@ def search_all():
                 n_permutations=100
             )
 
-            logging.info("best score perms: %s" % score)
+            logger.info("best score perms: %s" % score)
 
             save_csv('permute_pred_scores', permutation_pred_scores)
             save_csv('permute_max_coefs', best_svr.permute_max_coefs)
@@ -150,11 +152,14 @@ def search_all():
             if p_value >= .05:
                 logging.warn("p_value of %s >= .05")
 
-            learning_curve_title = "%s Learning Curve" % target_col
-            plot_learning_curve(search.best_estimator_,
-                                learning_curve_title, 
-                                data.get_values(), target.get_values(),
-                                f_name=learning_curve_title.replace(' ', '_') + '.png')
+            train_sizes, train_scores, test_scores = learning_curve(
+                seach.best_estimator_,
+                data.get_values(), target.get_values(),
+                cv=search.cv, train_sizes=np.linspace(.1, 1.0, 5))
+
+            save_csv("learning_curve_train_scores", train_scores)
+            save_csv("learning_curve_test_scores", test_scores)
+
 
 
 def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100, normalize=False):
@@ -279,7 +284,6 @@ def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
         default None
         name of file to save plot to (if set)
     """
-    from sklearn.learning_curve import learning_curve
 
     plt.figure()
     plt.title(title)
