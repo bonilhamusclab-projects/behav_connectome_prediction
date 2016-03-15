@@ -16,28 +16,45 @@ from sklearn.preprocessing import scale
 from sklearn.svm import LinearSVR, LinearSVC
 
 
-# Based on:
-# http://stackoverflow.com/questions/27928275/find-p-value-significance-in-scikit-learn-linearregression
-class LinearSVRPermuteCoef(LinearSVR):
+class LinearSVRPermuteCoef():
     def __init__(self, **kwargs):
+        self.model = LinearSVR(**kwargs)
         self.permute_max_coefs = []
         self.permute_min_coefs = []
-        super(LinearSVR, self).__init__(**kwargs)
 
-    def fit(self, X, y, n_jobs=1):
-        self = super(LinearSVR, self).fit(X, y, n_jobs)
+    def fit(self, X, y):
+        self.model.fit(X, y)
+
+        self.coef_ = self.model.coef_
+        self.intercept_ = self.model.intercept_
 
         def add_coef(arr, fn):
-            arr.append(fn(self.coef_))
+            arr.append(fn(self.model.coef_))
 
         add_coef(self.permute_max_coefs, np.max)
         add_coef(self.permute_min_coefs, np.min)
 
         return self
 
-    def resert_perm_coefs(self):
+    def reset_perm_coefs(self):
         self.permute_max_coefs = []
         self.permute_min_coefs = []
+
+    def get_params(self, deep=True):
+        return self.model.get_params(deep)
+
+    def set_params(self, **kwargs):
+        self.model.set_params(**kwargs)
+        return self
+    
+    def predict(self, X):    
+        return self.model.predict(X)
+
+    def score(self, X, y, sample_weight=None):
+        if sample_weight is not None:
+            return self.model.score(X, y, sample_weight)
+        else:
+            return self.model.score(X, y)
 
 
 def is_data_col(c):
@@ -81,7 +98,7 @@ def verbose_scorer(total_runs, score_fn=f1_score):
 
 def search_all():
     import logging
-    logging.basicConfig(filename='search_results.log', level=logging.DEBUG)
+    logging.basicConfig(filename='search_results.log', level=logging.DEBUG, filemode='w+')
 
     data_types = {'atw': ['z', 'diff_wpm'],
                   'adw': ['z']}
@@ -96,7 +113,7 @@ def search_all():
             search = run(full, target_col)
             search_normalize = run(full, target_col, normalize=True)
 
-            (search, normalized) = (search, "no") if search.best_score > search_normalize.best_score \
+            (search, normalized) = (search, "no") if search.best_score_ > search_normalize.best_score_ \
                 else (search_normalize, "yes")
 
             logging.info("normalized: %s" % normalized)
@@ -107,7 +124,7 @@ def search_all():
             data, target = separate(full, target_col)
 
             best_svr = search.best_estimator_.named_steps['svr']
-            best_svr.resert_perm_coefs()
+            best_svr.reset_perm_coefs()
 
             def save_csv(desc, arr):
                 np.savetxt('%s_%s.csv' % (target_col, desc), arr, delimiter=',')
@@ -116,7 +133,8 @@ def search_all():
 
             score, permutation_pred_scores, p_value = permutation_test_score(
                 search.best_estimator_,
-                data, target,
+                data.get_values(),
+                target.get_values(),
                 scoring=search.scoring,
                 cv=search.cv,
                 n_permutations=100
