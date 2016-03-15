@@ -76,7 +76,7 @@ def separate_cols(full):
 def separate(full, target_col):
     data_cols, y_cols = separate_cols(full)
 
-    assert target_col in y_cols, "%s not in cols" % target_col
+    assert target_col in y_cols, "%s not in %s" % (target_col, y_cols)
 
     target = full.loc[:, target_col]
     indices = pd.notnull(target)
