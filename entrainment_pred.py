@@ -19,10 +19,10 @@ from sklearn.svm import LinearSVR, LinearSVC
 # Based on:
 # http://stackoverflow.com/questions/27928275/find-p-value-significance-in-scikit-learn-linearregression
 class LinearSVRPermuteCoef(LinearSVR):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, **kwargs):
         self.permute_max_coefs = []
         self.permute_min_coefs = []
-        super(LinearSVR, self).__init__(*args, **kwargs)
+        super(LinearSVR, self).__init__(**kwargs)
 
     def fit(self, X, y, n_jobs=1):
         self = super(LinearSVR, self).fit(X, y, n_jobs)
