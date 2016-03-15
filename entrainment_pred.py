@@ -153,7 +153,7 @@ def search_all():
                 logging.warn("p_value of %s >= .05")
 
             train_sizes, train_scores, test_scores = learning_curve(
-                seach.best_estimator_,
+                search.best_estimator_,
                 data.get_values(), target.get_values(),
                 cv=search.cv, train_sizes=np.linspace(.1, 1.0, 5))
 
