@@ -1,0 +1,14 @@
+INFO:atw_z:results for atw_z
+INFO:atw_z:normalized: yes
+INFO:atw_z:best score: -0.0101360274636
+INFO:atw_z:best params: {'svr__C': 0.098454657585896929}
+INFO:atw_z:best score perms: -0.394349170977
+INFO:atw_z:p-value: 0.0990099009901
+WARNING:atw_z:p_value of %s >= .05
+INFO:adw_z:results for adw_z
+INFO:adw_z:normalized: yes
+INFO:adw_z:best score: 0.0107908601571
+INFO:adw_z:best params: {'svr__C': 0.0062987888851660616}
+INFO:adw_z:best score perms: -0.279855325332
+INFO:adw_z:p-value: 0.0792079207921
+WARNING:adw_z:p_value of %s >= .05
