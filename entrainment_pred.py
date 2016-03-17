@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.stats import gamma
+from scipy.stats import gamma, pearsonr
 from sklearn.cross_validation import permutation_test_score, ShuffleSplit
 from sklearn.grid_search import RandomizedSearchCV
 from sklearn.learning_curve import learning_curve
@@ -76,6 +76,36 @@ def is_data_col(c):
         return False
 
 
+def jhu_edge_coordinates(left, right, jhu=pd.read_csv("data/jhu_coords.csv")):
+    def loc_to_dict(loc):
+        ret = dict()
+        ret['x'], ret['y'], ret['z'] = jhu.iloc[loc, :3]
+        return ret
+
+    return {'left': loc_to_dict(left),
+            'right': loc_to_dict(right)}
+
+
+def memoize_no_arg(fn):
+    state = dict(called=False)
+
+    def fn_wrap():
+        if not state['called']:
+            state['called'] = True
+            state['ret'] = fn()
+        return state['ret']
+
+    return fn_wrap
+
+
+@memoize_no_arg
+def all_jhu_coordinates():
+    jhu = pd.read_csv("data/jhu_coords.csv")
+    return {"%s_%s" % (i, j): jhu_edge_coordinates(i, j, jhu)
+            for i in range(189)
+            for j in range(i+1, 189)}
+
+
 def separate_cols(full):
     data_cols = {c for c in full.columns if is_data_col(c)}
     y_cols = set(full.columns) - data_cols - {'id'}
@@ -106,18 +136,39 @@ def verbose_scorer(total_runs, score_fn=f1_score):
     return make_scorer(verbose_score_fn)
 
 
-def search_all(log_dir="data/step4/both_hemi"):
+def filter_roi_conns(df, conn_filter_fn):
+    """
+    :param df:
+    :param conn_filter_fn:
+    :return:
+    """
+    roi_conns = filter(is_data_col, df.columns)
+    non_conns = set(df.columns) - set(roi_conns)
+    filtered_roi_conns = filter(conn_filter_fn, roi_conns)
+    return df[list(non_conns.union(filtered_roi_conns))]
+
+
+def search_all(log_dir="data/step4/left_hemi",
+               conn_filter_fn=lambda conn: np.all(
+                   [i['x'] > 0 for i in all_jhu_coordinates()[conn].itervalues()]),
+               score_fn=lambda truth, preds: pearsonr(truth, preds)[0]
+               ):
     def _log_dir(f_name):
+        import os
         return os.path.join(log_dir, f_name)
 
     import logging
     logging.basicConfig(filename=_log_dir('search_results.log'), 
                         level=logging.DEBUG, filemode='w+')
 
-    data_types = {'atw': ['z', 'diff_wpm'],
+    data_types = {'atw': ['z'],
                   'adw': ['z']}
     for data_type in data_types:
         full = pd.read_csv("data/step3/full_%s.csv" % data_type)
+
+        if conn_filter_fn is not None:
+            full = filter_roi_conns(full, conn_filter_fn)
+
         for target_col in data_types[data_type]:
             target_col = data_type + '_' + target_col
             print("about to process: %s" % target_col)
@@ -125,8 +176,8 @@ def search_all(log_dir="data/step4/both_hemi"):
 
             logger.info("results for %s" % target_col)
 
-            search = run(full, target_col)
-            search_normalize = run(full, target_col, normalize=True)
+            search = run(full, target_col, score_fn=score_fn)
+            search_normalize = run(full, target_col, normalize=True, score_fn=score_fn)
 
             (search, normalized) = (search, "no") if search.best_score_ > search_normalize.best_score_ \
                 else (search_normalize, "yes")
@@ -175,7 +226,8 @@ def search_all(log_dir="data/step4/both_hemi"):
             save_csv("learning_curve_test_scores", test_scores)
 
 
-def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100, normalize=False):
+def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100, normalize=False,
+        score_fn=r2_score):
 
     svr = linearSVRPermuteCoefFactory()
     
@@ -196,7 +248,7 @@ def run(full, target_col, random_state=1234, c_range_alpha=.05, c_range_size=100
     cv = ShuffleSplit(len(target), n_iter=n_iter, test_size=1/6.0, random_state=random_state)
 
     total_runs = n_iter
-    scorer = verbose_scorer(total_runs, r2_score)
+    scorer = verbose_scorer(total_runs, score_fn)
 
     search = RandomizedSearchCV(pipeline, param_distributions=param_dist, cv=cv, scoring=scorer,
                                 random_state=random_state)
