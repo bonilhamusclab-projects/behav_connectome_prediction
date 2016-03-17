@@ -176,7 +176,7 @@ def search_all(log_dir="data/step4/left_hemi",
             logger.info("results for %s" % target_col)
 
             search = run(full, target_col)
-            search_normalize = run(full, target_col, normalize=True, score_fn=score_fn)
+            search_normalize = run(full, target_col, normalize=True)
 
             (search, normalized) = (search, "no") if search.best_score_ > search_normalize.best_score_ \
                 else (search_normalize, "yes")
