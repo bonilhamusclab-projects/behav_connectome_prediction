@@ -79,7 +79,7 @@ def is_data_col(c):
 def jhu_edge_coordinates(left, right, jhu=pd.read_csv("data/jhu_coords.csv")):
     def loc_to_dict(loc):
         ret = dict()
-        ret['x'], ret['y'], ret['z'] = jhu.iloc[loc, :3]
+        ret['x'], ret['y'], ret['z'], ret['name'] = jhu.iloc[loc, :]
         return ret
 
     return {'left': loc_to_dict(left),
