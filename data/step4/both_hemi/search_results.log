@@ -1,0 +1,18 @@
+INFO:atw_z:results for atw_z
+INFO:atw_z:normalized: yes
+INFO:atw_z:best score: 0.0841486680109
+INFO:atw_z:best params: {'svr__C': 0.098454657585896929}
+INFO:atw_z:best score perms: 0.0138574941728
+INFO:atw_z:p-value: 0.00990099009901
+INFO:atw_diff_wpm:results for atw_diff_wpm
+INFO:atw_diff_wpm:normalized: no
+INFO:atw_diff_wpm:best score: 0.169099889956
+INFO:atw_diff_wpm:best params: {'svr__C': 0.0062987888851660616}
+INFO:atw_diff_wpm:best score perms: 0.169092673031
+INFO:atw_diff_wpm:p-value: 0.00990099009901
+INFO:adw_z:results for adw_z
+INFO:adw_z:normalized: yes
+INFO:adw_z:best score: 0.0997514050901
+INFO:adw_z:best params: {'svr__C': 0.060487930870555311}
+INFO:adw_z:best score perms: 0.0929428753746
+INFO:adw_z:p-value: 0.00990099009901

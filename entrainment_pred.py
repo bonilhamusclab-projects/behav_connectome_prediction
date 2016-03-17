@@ -106,9 +106,13 @@ def verbose_scorer(total_runs, score_fn=f1_score):
     return make_scorer(verbose_score_fn)
 
 
-def search_all():
+def search_all(log_dir="data/step4/both_hemi"):
+    def _log_dir(f_name):
+        return os.path.join(log_dir, f_name)
+
     import logging
-    logging.basicConfig(filename='search_results.log', level=logging.DEBUG, filemode='w+')
+    logging.basicConfig(filename=_log_dir('search_results.log'), 
+                        level=logging.DEBUG, filemode='w+')
 
     data_types = {'atw': ['z', 'diff_wpm'],
                   'adw': ['z']}
@@ -138,7 +142,8 @@ def search_all():
             best_svr.reset_perm_coefs()
 
             def save_csv(desc, arr):
-                np.savetxt('%s_%s.csv' % (target_col, desc), arr, delimiter=',')
+                f_name = _log_dir('%s_%s.csv' % (target_col, desc))
+                np.savetxt(f_name, arr, delimiter=',')
 
             save_csv('best_coefs', best_svr.coef_)
 
