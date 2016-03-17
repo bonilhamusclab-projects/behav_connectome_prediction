@@ -150,8 +150,7 @@ def filter_roi_conns(df, conn_filter_fn):
 
 def search_all(log_dir="data/step4/left_hemi",
                conn_filter_fn=lambda conn: np.all(
-                   [i['x'] > 0 for i in all_jhu_coordinates()[conn].itervalues()]),
-               score_fn=lambda truth, preds: pearsonr(truth, preds)[0]
+                   [i['x'] > 0 for i in all_jhu_coordinates()[conn].itervalues()])
                ):
     def _log_dir(f_name):
         import os
@@ -176,7 +175,7 @@ def search_all(log_dir="data/step4/left_hemi",
 
             logger.info("results for %s" % target_col)
 
-            search = run(full, target_col, score_fn=score_fn)
+            search = run(full, target_col)
             search_normalize = run(full, target_col, normalize=True, score_fn=score_fn)
 
             (search, normalized) = (search, "no") if search.best_score_ > search_normalize.best_score_ \
