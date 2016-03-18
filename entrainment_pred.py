@@ -175,7 +175,7 @@ def filter_roi_conns(df, conn_filter_fn):
     return df[list(non_conns.union(filtered_roi_conns))]
 
 
-def search_all(log_dir="data/step4/left_hemi_adjusted",
+def search_all(log_dir="data/step4/left_hemi_select_rois",
                conn_filter_fn=lambda conn: np.all(
                    [i['name'] in get_jhu_names("data/jhu_rois_left_adjusted.csv")
                     for i in all_jhu_coordinates()[conn].itervalues()])
