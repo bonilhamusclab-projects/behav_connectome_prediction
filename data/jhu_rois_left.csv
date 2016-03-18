@@ -1,0 +1,96 @@
+order,name,desc
+1,SFG_L,superior frontal gyrus (posterior segment) left
+3,SFG_PFC_L,superior frontal gyrus (prefrontal cortex) left
+5,SFG_pole_L,superior frontal gyrus (frontal pole) left
+7,MFG_L,middle frontal gyrus (posterior segment) left
+9,MFG_DPFC_L,middle frontal gyrus (dorsal prefrontal cortex) left
+11,IFG_opercularis_L,inferior frontal gyrus pars opercularis left
+13,IFG_orbitalis_L,inferior frontal gyrus pars orbitralis left
+15,IFG_triangularis_L,inferior frontal gyrus pars triangularis left
+17,LFOG_L,lateral fronto-orbital gyrus left
+19,MFOG_L,middle fronto-orbital gyrus left
+21,RG_L,gyrus rectus left
+23,PoCG_L,postcentral gyrus left
+25,PrCG_L,precentral gyrus left
+27,SPG_L,Superior parietal gyrus left
+29,SMG_L,supramarginal gyrus left
+31,AG_L,angular gyrus left
+33,PrCu_L,pre-cuneus left
+35,STG_L,superior temporal gyrus left
+37,STG_L_pole,pole of superior temporal gyrus left
+39,MTG_L,middle temporal gyrus left
+41,MTG_L_pole,pole of middle temporal gyrus left
+43,ITG_L,inferior temporal gyrus left
+45,PHG_L,parahippocampal gyrus left
+47,ENT_L,entorhinal area left
+49,FuG_L,fusiform gyrus left
+51,SOG_L,superior occipital gyrus left
+53,MOG_L,middle occipital gyrus left
+55,IOG_L,inferior occipital gyrus left
+57,Cu_L,cuneus left
+59,LG_L,lingual gyrus left
+61,rostral_ACC_L,rostral anterior cingulate gyrus left
+63,subcallosal_ACC_L,subcallosal anterior cingulate gyrus left
+65,subgenual_ACC_L,subgenual anterior cingulate gyrus left
+67,dorsal_ACC_L,dorsal anterior cingulate gyrus left
+69,PCC_L,posterior cingulate gyrus left
+71,Ins_L,insular left
+73,Amyg_L,amygdala left
+75,Hippo_L,hippocampus left
+77,Caud_L,caudate nucleus left
+79,Put_L,putamen left
+81,GP_L,globus pallidus left
+83,Thal_L,thalamus left
+85,Hypothalamus_L,hypothalamus left
+87,Mynert_L,nucleus innominata of mynert left
+89,NucAccumbens_L,nucleus accumbens left
+91,RedNc_L,red nucleus left
+93,Snigra_L,substancia nigra left
+96,cerebellum_L,cerebellum left
+97,CP_L,cerebral peduncle left
+99,Midbrain_L,midbrain left
+101,CST_L,corticospinal tract left
+103,SCP_L,superior cerebellar peduncle left
+105,MCP_L,middle cerebellar peduncle left
+107,PCT_L,pontine crossing tract (a part of MCP) left
+109,ICP_L,inferior cerebellar peduncle left
+111,ML_L,medial lemniscus left
+113,Pons_L,pons left
+115,Medulla_L,medulla left
+117,ACR_L,anterior corona radiata left
+119,SCR_L,superior corona radiata left
+121,PCR_L,posterior corona radiata left
+123,GCC_L,genu of corpus callosum left
+125,BCC_L,body of corpus callosum left
+127,SCC_L,splenium of corpus callosum left
+129,TAP_L,tapatum left
+131,ALIC_L,anterior limb of internal capsule left
+133,PLIC_L,posterior limb of internal capsule left
+135,RLIC_L,retrolenticular part of internal capsule left
+137,EC_L,external capsule left
+139,CGC_L,cingulum (cingulate gyrus) left
+141,CGH_L,cingulum (hippocampus) left
+143,Fx/ST_L,fornix (cres) / Stria terminalis (can not be resolved with current resolution) left
+145,Fx_L,Fornix (column and body of fornix) left
+147,IFO_L,Inferior fronto-occipital fasciculus left
+149,PTR_L,Posterior thalamic radiation (include optic radiation) left
+151,SS_L,Sagittal stratum (include inferior longitidinal fasciculus and inferior fronto-occipital fasciculus) left
+153,SFO_L,Superior fronto-occipital fasciculus (could be a part of anterior internal capsule) left
+155,SLF_L,Superior longitudinal fasciculus left
+157,UNC_L,Uncinate fasciculus left
+159,AnsaLenticularis_L,Ansa lenticularis left
+161,AnteriorCom_L,Anterior commissure left
+163,LenticularFasc_L,Lenticular fasciclus left
+165,OlfactoryRadiation_L,olfactory radiation  left
+167,Mammillary_L,mammillary body left
+169,OpticTract_L,optic tract left
+171,LV_frontal_L,lateral ventricle_frontal left
+172,LV_body_L,lateral ventricle_body left
+173,LV_atrium_L,lateral ventricle_atrium left
+174,LV_occipital_L,lateral ventricle_occipital left
+175,LV_temporal_L,lateral ventricle_temporal left
+181,III_and_IV_ventricle,III and IV ventricle
+182,PIns_L,posterior insula left
+184,PSTG_L,posterior superior temporal gyrus left
+186,PSMG_L,posterior middle temporal gyrus left
+188,PSIG_L,posterior inferior temporal gyrus left

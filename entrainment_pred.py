@@ -106,6 +106,33 @@ def all_jhu_coordinates():
             for j in range(i+1, 189)}
 
 
+def memoize(f):
+    """
+    :param f:
+    :return:
+    Memoization decorator for functions taking one or more arguments.
+    http://code.activestate.com/recipes/578231-probably-the-fastest-memoization-decorator-in-the-/
+    """
+    class memodict(dict):
+        def __init__(self, f):
+            self.f = f
+
+        def __call__(self, *args):
+            return self[args]
+
+        def __missing__(self, key):
+            ret = self[key] = self.f(*key)
+            return ret
+
+    return memodict(f)
+
+
+@memoize
+def get_jhu_names(jhu_f="data/jhu_rois_left_adjusted.csv"):
+    jhu = pd.read_csv(jhu_f)
+    return set(jhu["name"])
+
+
 def separate_cols(full):
     data_cols = {c for c in full.columns if is_data_col(c)}
     y_cols = set(full.columns) - data_cols - {'id'}
@@ -148,9 +175,10 @@ def filter_roi_conns(df, conn_filter_fn):
     return df[list(non_conns.union(filtered_roi_conns))]
 
 
-def search_all(log_dir="data/step4/left_hemi",
+def search_all(log_dir="data/step4/left_hemi_adjusted",
                conn_filter_fn=lambda conn: np.all(
-                   [i['x'] > 0 for i in all_jhu_coordinates()[conn].itervalues()])
+                   [i['name'] in get_jhu_names("data/jhu_rois_left_adjusted.csv")
+                    for i in all_jhu_coordinates()[conn].itervalues()])
                ):
     def _log_dir(f_name):
         import os
