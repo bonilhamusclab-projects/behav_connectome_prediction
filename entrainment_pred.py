@@ -249,6 +249,7 @@ def search_all(log_dir="data/step4/left_hemi_select_rois",
                 data.get_values(), target.get_values(),
                 cv=search.cv, train_sizes=np.linspace(.1, 1.0, 5))
 
+            save_csv("learning_curve_train_sizes", train_sizes)
             save_csv("learning_curve_train_scores", train_scores)
             save_csv("learning_curve_test_scores", test_scores)
 
@@ -339,7 +340,74 @@ def ttest_1samp_one_tail(test_arr, mu0):
     return _ttest_one_tail(test_arr, mu0, stats.ttest_1samp, 'Ttest_1sampResult')
 
 
-def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
+def plot_learning_curve_files(title,
+                              train_scores,
+                              test_scores,
+                              train_sizes=None,
+                              plot_f=None):
+    """
+    Generate a simple plot of the test and traning learning curve.
+
+    Parameters
+    ----------
+
+    title : string
+        Title for the chart.
+
+    train_scores : string or MxN matrix
+
+    test_scores : string or MxN matrix
+
+    train_sizes : string or matrix, optional
+
+    plot_f: string, optional
+        default None
+        name of file to save plot to (if set)
+    """
+
+    plt.figure()
+    plt.title(title)
+    plt.xlabel("Training examples")
+    plt.ylabel("Score")
+
+    def load_if_filename(f):
+        return np.loadtxt(f, delimiter=',') if isinstance(f, str) else f
+
+    train_scores = load_if_filename(train_scores)
+    test_scores = load_if_filename(test_scores)
+
+    train_scores_mean = np.mean(train_scores, axis=1)
+    test_scores_mean = np.mean(test_scores, axis=1)
+
+    plt.grid()
+
+    plt.plot(train_scores_mean, 'o-', color="r",
+             label="Training score")
+    plt.plot(test_scores_mean, 'o-', color="g",
+             label="Cross-validation score")
+
+    train_scores_std = np.std(train_scores, axis=1)
+    train_sizes = range(0, len(train_scores_std)) if \
+        train_sizes is None else load_if_filename(train_sizes)
+
+    plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
+                     train_scores_mean + train_scores_std, alpha=0.1,
+                     color="r")
+
+    test_scores_std = np.std(test_scores, axis=1)
+    plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
+                     test_scores_mean + test_scores_std, alpha=0.1,
+                     color="g")
+
+    plt.legend(loc="best")
+
+    if plot_f is not None:
+        plt.savefig(plot_f)
+
+    return np.max(train_scores_mean), np.max(test_scores_mean)
+
+
+def plot_learning_curve(estimator, title, X, y, cv=None,
                         n_jobs=1, train_sizes=np.linspace(.1, 1.0, 5),
                         f_name=None):
     """
@@ -361,9 +429,6 @@ def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
         Target relative to X for classification or regression;
         None for unsupervised learning.
 
-    ylim : tuple, shape (ymin, ymax), optional
-        Defines minimum and maximum yvalues plotted.
-
     cv : integer, cross-validation generator, optional
         If an integer is passed, it is the number of folds (defaults to 3).
         Specific cross-validation objects can be passed, see
@@ -377,37 +442,11 @@ def plot_learning_curve(estimator, title, X, y, ylim=None, cv=None,
         name of file to save plot to (if set)
     """
 
-    plt.figure()
-    plt.title(title)
-    if ylim is not None:
-        plt.ylim(*ylim)
-    plt.xlabel("Training examples")
-    plt.ylabel("Score")
     train_sizes, train_scores, test_scores = learning_curve(
         estimator, X, y, cv=cv, n_jobs=n_jobs, train_sizes=train_sizes)
-    train_scores_mean = np.mean(train_scores, axis=1)
-    train_scores_std = np.std(train_scores, axis=1)
-    test_scores_mean = np.mean(test_scores, axis=1)
-    test_scores_std = np.std(test_scores, axis=1)
 
-    plt.grid()
-
-    plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
-                     train_scores_mean + train_scores_std, alpha=0.1,
-                     color="r")
-    plt.fill_between(train_sizes, test_scores_mean - test_scores_std,
-                     test_scores_mean + test_scores_std, alpha=0.1, color="g")
-    plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
-             label="Training score")
-    plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
-             label="Cross-validation score")
-
-    plt.legend(loc="best")
-
-    if f_name is not None:
-        plt.savefig(f_name)
-
-    return np.max(train_scores_mean), np.max(test_scores_mean)
+     return plot_learning_curve_files(title, train_scores, test_scores,
+                                      train_sizes, f_name)
 
 
 if __name__ == "__main__":
