@@ -382,16 +382,17 @@ def plot_learning_curve_files(title,
     train_scores_mean = np.mean(train_scores, axis=1)
     test_scores_mean = np.mean(test_scores, axis=1)
 
+    train_sizes = range(0, len(train_scores_mean)) if \
+        train_sizes is None else load_if_filename(train_sizes)
+
     plt.grid()
 
-    plt.plot(train_scores_mean, 'o-', color="r",
+    plt.plot(train_sizes, train_scores_mean, 'o-', color="r",
              label="Training score")
-    plt.plot(test_scores_mean, 'o-', color="g",
+    plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
              label="Cross-validation score")
 
     train_scores_std = np.std(train_scores, axis=1)
-    train_sizes = range(0, len(train_scores_std)) if \
-        train_sizes is None else load_if_filename(train_sizes)
 
     plt.fill_between(train_sizes, train_scores_mean - train_scores_std,
                      train_scores_mean + train_scores_std, alpha=0.1,
