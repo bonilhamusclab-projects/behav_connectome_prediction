@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy import stats
-from scipy.stats import gamma, pearsonr
+from scipy.stats import gamma
 from sklearn.cross_validation import permutation_test_score, ShuffleSplit
 from sklearn.grid_search import RandomizedSearchCV
 from sklearn.learning_curve import learning_curve
@@ -54,13 +54,16 @@ def linearSVRPermuteCoefFactory():
             else:
                 return self.model.score(X, y)
 
-        def permute_min_coefs(self):
+        @staticmethod
+        def permute_min_coefs():
             return coeffs_state['min']
 
-        def permute_max_coefs(self):
+        @staticmethod
+        def permute_max_coefs():
             return coeffs_state['max']
 
-        def reset_perm_coefs(self):
+        @staticmethod
+        def reset_perm_coefs():
             coeffs_state['min'] = []
             coeffs_state['max'] = []
 
@@ -113,7 +116,7 @@ def memoize(f):
     Memoization decorator for functions taking one or more arguments.
     http://code.activestate.com/recipes/578231-probably-the-fastest-memoization-decorator-in-the-/
     """
-    class memodict(dict):
+    class MemoDict(dict):
         def __init__(self, f):
             self.f = f
 
@@ -124,7 +127,7 @@ def memoize(f):
             ret = self[key] = self.f(*key)
             return ret
 
-    return memodict(f)
+    return MemoDict(f)
 
 
 @memoize
@@ -445,7 +448,7 @@ def plot_learning_curve(estimator, title, X, y, cv=None,
     train_sizes, train_scores, test_scores = learning_curve(
         estimator, X, y, cv=cv, n_jobs=n_jobs, train_sizes=train_sizes)
 
-     return plot_learning_curve_files(title, train_scores, test_scores,
+    return plot_learning_curve_files(title, train_scores, test_scores,
                                       train_sizes, f_name)
 
 
