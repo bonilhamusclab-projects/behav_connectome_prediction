@@ -48,6 +48,7 @@ function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol})
   mk_zeros = () -> zeros(Float64, num_edges)
 
   coefs = mk_zeros()
+  cors = mk_zeros()
   pvalues = ones(Float64, num_edges)
   tscores = mk_zeros()
 
@@ -59,10 +60,11 @@ function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol})
     fm = eval(parse(fm_str))
     ct = coeftable(lm(fm, df))
     coefs[ix], tscores[ix], pvalues[ix] = ct.mat[2, [1, 3, 4]]
+    cors[ix] = cor(df[edge], df[target])
   end
 
   edge_names = create_edge_names(edges)
-  ret = DataFrame(coef=coefs, pvalue=pvalues, tscore=tscores, edge=edges, edge_name=edge_names)
+  ret = DataFrame(coef=coefs, pvalue=pvalues, tscore=tscores, edge=edges, edge_name=edge_names, cor_coef=cors)
 
   ret[:pvalue_adj] = padjust(ret[:pvalue], BenjaminiHochberg)
 
