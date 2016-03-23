@@ -2,6 +2,7 @@ using DataFrames
 using GLM
 using Memoize
 using PValueAdjust
+using PyCall
 
 full_adw = readtable("data/step3/full_adw.csv")
 full_atw = readtable("data/step3/full_atw.csv")
@@ -149,9 +150,15 @@ function calc_all()
 
 end
 
-function save_calc_all_results(res::Dict)
+function save_calc_all_results(res::Dict, dir::AbstractString)
   for k in keys(res)
     df = res[k]::DataFrame
-    writetable("data/step4/valid_coefs_explore/$k.csv", df)
+    writetable("$dir/$k.csv", df)
   end
+end
+
+function load_local_py(name)
+  (name, ext) = rsplit(name, '.';limit=2)
+  (file, filename, data) = imp.find_module(name, ["."])
+  imp.load_module(name, file, filename, data)
 end
