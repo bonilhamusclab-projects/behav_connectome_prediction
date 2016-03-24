@@ -4,7 +4,7 @@ using Memoize
 using PValueAdjust
 using PyCall
 
-@enum Measure atw adw
+@enum MeasureGroup atw adw
 
 full_adw = readtable("data/step3/full_adw.csv")
 full_atw = readtable("data/step3/full_atw.csv")
@@ -151,7 +151,7 @@ Base.getindex(d::DataTarget, s::Symbol) = d.(s)
 Base.next(d::DataTarget, state) = d[fieldnames(DataTarget)[state]], state + 1
 Base.done(d::DataTarget, state) = state > length(fieldnames(DataTarget))
 
-function calc_all(data_targets::Vector{DataTarget})
+function calc_all_measures(data_targets::Vector{DataTarget})
 
   ret = Dict()
 
@@ -196,15 +196,15 @@ macro eval_str(s)
 end
 
 
-macro calc_all()
+macro calc_all_measures()
   quote
-    function calc_dt_diff(m::Measure)
+    function calc_dt_diff(m::MeasureGroup)
       full = @eval_str "full_$m"
       target = @eval_str ":$(m)_diff_wpm"
       DataTarget(full, target, rows_filter=rows_filter_gen(m))
     end
 
-    function calc_dt_covar(m::Measure)
+    function calc_dt_covar(m::MeasureGroup)
       full = @eval_str "full_$m"
       target = @eval_str ":se_$m"
       covars = @eval_str "[:pd_$m]"
@@ -213,40 +213,59 @@ macro calc_all()
 
     data_targets = [calc_dt_covar(adw), calc_dt_covar(atw),
                     calc_dt_diff(adw), calc_dt_diff(atw)]
-    calc_all(data_targets)
+    calc_all_measures(data_targets)
   end
 end
 
 
-function calc_all_all_subjects()
-  rows_filter_gen(m::Measure) = d::DataFrame -> repmat([true], size(d, 1))
+function calc_scenario_all()
+  rows_filter_gen(m::MeasureGroup) = d::DataFrame -> repmat([true], size(d, 1))
 
-  @calc_all
+  @calc_all_measures
 end
 
 
-function calc_all_improved_subjects()
-  @memoize diff_col(m::Measure) = symbol(m, "_diff_wpm")
+function calc_scenario_improved()
+  @memoize diff_col(m::MeasureGroup) = symbol(m, "_diff_wpm")
 
-  rows_filter_gen(m::Measure) =  d::DataFrame -> d[diff_col(m)] .> 0
+  rows_filter_gen(m::MeasureGroup) =  d::DataFrame -> d[diff_col(m)] .> 0
 
-  @calc_all
+  @calc_all_measures
 end
 
 
-function calc_all_poor_pd_subjects()
-  @memoize pd_z_col(m::Measure) = symbol("pd_", m, "_z")
+function calc_scenario_poor_pd()
+  @memoize pd_z_col(m::MeasureGroup) = symbol("pd_", m, "_z")
 
-  rows_filter_gen(m::Measure) = d::DataFrame -> d[pd_z_col(m)] .< -1
+  rows_filter_gen(m::MeasureGroup) = d::DataFrame -> d[pd_z_col(m)] .< -1
 
-  @calc_all
+  @calc_all_measures
 end
 
 
-function save_calc_all_results(res::Dict, dir::AbstractString)
+function calc_all_scenarios()
+  ret = Dict()
+  ret[:all] = calc_scenario_all()
+  ret[:improved] = calc_scenario_improved()
+  ret[:poor_pd] = calc_scenario_poor_pd()
+  ret
+end
+
+
+function save_calc_scenario_results(res::Dict, dir::AbstractString)
   for k in keys(res)
     df = res[k]::DataFrame
-    writetable("$dir/$k.csv", df)
+    writetable(joinpath("$dir", "$k.csv"), df)
+  end
+end
+
+function save_all_scenarios(res::Dict)
+  for (sk, sr) in res
+    dir = joinpath("data/step4/scenarios/", "$sk")
+    if !isdir(dir)
+      mkpath(dir)
+    end
+    save_calc_scenario_results(sr, dir)
   end
 end
 
