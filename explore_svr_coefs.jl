@@ -130,9 +130,7 @@ function learning_curve(m::MeasureGroup;
                         edge_filter::Function = is_left_hemi_select_edge,
                         C=1.0,
                         seed::Nullable{Int}=Nullable(1234))
-  if !isnull(seed)
-    srand(get(seed))
-  end
+  isnull(seed) || srand(get(seed))
 
   svr = LinearSVR(C=C)
   cv_gen = (n) -> RandomSub(n, round(Int64, .8 * n), 5)
