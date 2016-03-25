@@ -178,9 +178,9 @@ end
 
 function calc_all_scenarios()
   ret = Dict()
-  ret[:all] = calc_scenario_all()
-  ret[:improved] = calc_scenario_improved()
-  ret[:poor_pd] = calc_scenario_poor_pd()
+  ret[all_subjects] = calc_scenario_all()
+  ret[improved] = calc_scenario_improved()
+  ret[poor_pd] = calc_scenario_poor_pd()
   ret
 end
 
@@ -193,8 +193,8 @@ function save_calc_scenario_results(res::Dict, dir::AbstractString)
 end
 
 function save_all_scenarios(res::Dict)
-  for (sk, sr) in res
-    dir = joinpath("data/step4/linear_reg/", "$sk")
+  for (s::SubjectGroup, sr) in res
+    dir = joinpath("data/step4/linear_reg/", "$s")
     isdir(dir) || mkpath(dir)
 
     save_calc_scenario_results(sr, dir)
