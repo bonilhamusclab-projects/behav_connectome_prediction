@@ -39,6 +39,13 @@ function get_edges(df::DataFrame; region::Region=full_brain)
 end
 
 
+macro eval_str(s)
+  quote
+    eval(parse($s))
+  end
+end
+
+
 function get_edges(m::MeasureGroup, region::Region)
   full::DataFrame = @eval_str "full_$m()"
   get_edges(full, region=region)
@@ -57,12 +64,6 @@ names_set(df_fn::Function) = @> df_fn()[:name] Set
 
 @memoize jhu_left_select() = readtable("data/jhu_rois_left_adjusted.csv")
 @memoize jhu_left_select_names() = @> jhu_left_select names_set
-
-macro eval_str(s)
-  quote
-    eval(parse($s))
-  end
-end
 
 
 edge_reg = r"x([0-9]+)_([0-9]+)"
