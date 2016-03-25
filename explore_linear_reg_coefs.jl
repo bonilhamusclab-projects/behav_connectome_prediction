@@ -6,17 +6,6 @@ using PValueAdjust
 include("helpers.jl")
 
 
-@memoize function mk_edge_string(edge::Symbol)
-  left, right = edge_col_to_roi_names(edge)
-  "$(left) -- $(right)"
-end
-
-
-function create_edge_names(edges::Vector{Symbol})
-  map(mk_edge_string, edges)
-end
-
-
 macro update_covar(k, v)
   :(
     covar_dt[symbol(c, "_", $k)][ix] = $v
@@ -149,14 +138,14 @@ macro calc_all_measures()
     function calc_dt_diff(m::MeasureGroup)
       full = @eval_str "full_$m()"
       target = @eval_str ":$(m)_diff_wpm"
-      DataTarget(full, target, rows_filter=rows_filter_gen(m))
+      DataTarget(full, target, rows_filter=subject_filter_gen(m))
     end
 
     function calc_dt_covar(m::MeasureGroup)
       full = @eval_str "full_$m()"
       target = @eval_str ":se_$m"
       covars = @eval_str "[:pd_$m]"
-      DataTarget(full, target, covars=covars, rows_filter = rows_filter_gen(m))
+      DataTarget(full, target, covars=covars, rows_filter =subject_filter_gen(m))
     end
 
     data_targets = [calc_dt_covar(adw), calc_dt_covar(atw),
@@ -167,25 +156,21 @@ end
 
 
 function calc_scenario_all()
-  rows_filter_gen(m::MeasureGroup) = d::DataFrame -> repmat([true], size(d, 1))
+  subject_filter_gen = subject_filter_gen_gen(all_subjects)
 
   @calc_all_measures
 end
 
 
 function calc_scenario_improved()
-  @memoize diff_col(m::MeasureGroup) = symbol(m, "_diff_wpm")
-
-  rows_filter_gen(m::MeasureGroup) =  d::DataFrame -> d[diff_col(m)] .> 0
+  subject_filter_gen = subject_filter_gen_gen(improved)
 
   @calc_all_measures
 end
 
 
 function calc_scenario_poor_pd()
-  @memoize pd_z_col(m::MeasureGroup) = symbol("pd_", m, "_z")
-
-  rows_filter_gen(m::MeasureGroup) = d::DataFrame -> d[pd_z_col(m)] .< -1
+  subject_filter_gen = subject_filter_gen_gen(poor_pd)
 
   @calc_all_measures
 end
@@ -210,9 +195,8 @@ end
 function save_all_scenarios(res::Dict)
   for (sk, sr) in res
     dir = joinpath("data/step4/scenarios/", "$sk")
-    if !isdir(dir)
-      mkpath(dir)
-    end
+    isdir(dir) || mkpath(dir)
+
     save_calc_scenario_results(sr, dir)
   end
 end

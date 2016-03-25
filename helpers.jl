@@ -4,9 +4,46 @@ using Memoize
 
 @enum MeasureGroup atw adw
 
-function get_edges(df::DataFrame)
-  filter(n -> startswith(string(n), "x"), names(df))
+@enum Target diff_wpm se
+
+@enum Region left_select left full_brain
+
+@enum SubjectGroup poor_pd improved all_subjects
+
+@memoize function is_left_hemi_edge(edge_col::Symbol)
+  a, b = edge_col_to_roi_names(edge_col)
+  in(a, jhu_left_names()) & in(b, jhu_left_names())
 end
+
+
+@memoize function is_left_hemi_select_edge(edge_col::Symbol)
+  a, b = edge_col_to_roi_names(edge_col)
+  in(a, jhu_left_select_names()) & in(b, jhu_left_select_names())
+end
+
+
+@memoize function region_filter_gen(region::Region)
+  @switch region begin
+    left_select; is_left_hemi_select_edge
+    left; is_left_hemi_edge
+    full_brain; edge::Symbol -> true
+  end
+end
+
+
+function get_edges(df::DataFrame; region::Region=full_brain)
+  edge_filter(n::Symbol) = startswith(string(n), "x")
+  region_filter = region_filter_gen(region)
+
+  filter(n::Symbol -> edge_filter(n) && region_filter(n), names(df))
+end
+
+
+function get_edges(m::MeasureGroup, region::Region)
+  full::DataFrame = @eval_str "full_$m()"
+  get_edges(full, region=region)
+end
+
 
 @memoize full_adw() = readtable("data/step3/full_adw.csv")
 @memoize full_atw() = readtable("data/step3/full_atw.csv")
@@ -44,13 +81,21 @@ end
 end
 
 
-@memoize function is_left_hemi_edge(edge_col::Symbol)
-  a, b = edge_col_to_roi_names(edge_col)
-  in(a, jhu_left_names()) & in(b, jhu_left_names())
+@memoize function mk_edge_string(edge::Symbol)
+  left, right = edge_col_to_roi_names(edge)
+  "$(left) -- $(right)"
 end
 
 
-@memoize function is_left_hemi_select_edge(edge_col::Symbol)
-  a, b = edge_col_to_roi_names(edge_col)
-  in(a, jhu_left_select_names()) & in(b, jhu_left_select_names())
+function create_edge_names(edges::Vector{Symbol})
+  map(mk_edge_string, edges)
+end
+
+
+@memoize function subject_filter_gen_gen(s::SubjectGroup)
+  @switch s begin
+    all_subjects; m::MeasureGroup -> d::DataFrame -> repmat([true], size(d, 1))
+    improved; m::MeasureGroup -> d::DataFrame -> d[symbol(m, "_diff_wpm")] .> 0
+    poor_pd; m::MeasureGroup -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 0
+  end
 end

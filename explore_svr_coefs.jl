@@ -18,11 +18,10 @@ function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
   1 - numerator/denominator
 end
 
-@enum Target diff_wpm se
 
-
-function get_Xy(t::Target, m::MeasureGroup;
-                edge_filter::Function = edge::Symbol -> true)
+function get_Xy(m::MeasureGroup, t::Target;
+                region::Region=full_brain,
+                group::SubjectGroup=all_subjects)
   full::DataFrame = @eval_str "full_$m()"
   target::Symbol = begin
     str = @switch t begin
@@ -32,11 +31,16 @@ function get_Xy(t::Target, m::MeasureGroup;
     @eval_str str
   end
 
+  subject_rows::Vector{Bool} = subject_filter_gen_gen(group)(m)(full)
+
   X::Matrix{Float64} = begin
-    edges::Vector{Symbol} = filter(edge_filter, get_edges(full))
-    Matrix(full[:, edges])
+    edges::Vector{Symbol} = get_edges(full, region=region)
+    Matrix(full[subject_rows, edges])
   end
-  y::Vector{Float64} = Array(full[target])
+  y::Vector{Float64} = begin
+    Array(full[subject_rows, target])
+  end
+
   X, y
 end
 
@@ -44,7 +48,7 @@ end
 function pred_diff(m::MeasureGroup)
   svr = LinearSVR()
 
-  X, y = get_Xy(diff_wpm, m)
+  X, y = get_Xy(diff_wpm, m, diff_wpm)
 
   fit(inds::Vector{Int64}) = svr[:fit](X[inds, :], y[inds])
 
@@ -80,11 +84,11 @@ end
 function learning_curve(svr::PyObject,
                         cv_gen::Function,
                         m::MeasureGroup,
-                        edge_filter::Function,
+                        region::Region,
                         train_ratios::AbstractVector{Float64}=1./6:1./6:1.;
                         score_fn::Function=r2_score)
 
-  X, y = get_Xy(diff_wpm, m, edge_filter=edge_filter)
+  X, y = get_Xy(m, diff_wpm, region=region)
   num_samples::Int64 = length(y)
 
   train_sizes::Vector{Int64} = ratios_to_counts(train_ratios, num_samples)
@@ -126,13 +130,118 @@ function learning_curve(svr::PyObject,
 end
 
 
+function cv_gen_gen(cv::Type, n_folds::Int64)
+  @assert cv <: CrossValGenerator
+  @switch cv begin
+    Kfold; (n::Int64) -> Kfold(n, n_folds)
+    RandomSub; (n::Int64) -> RandomSub(n, round(Int64, .8 * n), n_folds)
+  end
+end
+
+
 function learning_curve(m::MeasureGroup;
-                        edge_filter::Function = is_left_hemi_select_edge,
+                        region::Region=left_select,
                         C=1.0,
                         seed::Nullable{Int}=Nullable(1234))
   isnull(seed) || srand(get(seed))
 
   svr = LinearSVR(C=C)
-  cv_gen = (n) -> RandomSub(n, round(Int64, .8 * n), 5)
-  learning_curve(svr, cv_gen, m, edge_filter)
+  cv_gen = cv_gen_gen(RandomSub, 25)
+  learning_curve(svr, cv_gen, m, region)
+end
+
+
+function calc_coefs(m::MeasureGroup,
+                    C::Float64,
+                    target::Target,
+                    region::Region;
+                    group::SubjectGroup=all_subjects,
+                    n_folds::Int64=25,
+                    n_perms::Int64 = 100)
+  X::Matrix{Float64}, y::Vector{Float64} = get_Xy(m, target;
+                                                  region=region,
+                                                  group=group)
+
+  num_samples::Int64 = length(y)
+
+  svr = LinearSVR(C=C)
+  cv::CrossValGenerator = cv_gen_gen(RandomSub, n_folds)(num_samples)
+
+  pos_perm_coefs = zeros(Float64, n_perms)
+  neg_perm_coefs = zeros(Float64, n_perms)
+  test_scores = zeros(Float64, n_perms)
+
+  edge_info = DataFrame()
+  edge_info[:edge] = get_edges(m, region)
+  edge_info[:edge_name] = map(mk_edge_string, edge_info[:edge])
+
+  function fit_and_test_gen(ys::Vector{Float64},
+                            fit_callback::Function)
+
+    fit(inds::Vector{Int64}) = begin
+      svr[:fit](X[inds, :], ys[inds])
+      fit_callback()
+      svr
+    end
+
+    test(c::PyObject, inds::Vector{Int64}) =
+      r2_score(ys[inds], c[:predict](X[inds, :]))
+
+    (fit, test)
+  end
+
+  for p::Int64 in 1:n_perms
+    y_shuf = shuffle(y)
+    pos_perm_coefs[p] = -Inf
+    neg_perm_coefs[p] = Inf
+
+    fit, test = begin
+      fit_callback() = begin
+        pos_perm_coefs[p] = max(pos_perm_coefs[p], maximum(svr[:coef_]))
+        neg_perm_coefs[p] = min(neg_perm_coefs[p], minimum(svr[:coef_]))
+      end
+      fit_and_test_gen(y_shuf, fit_callback)
+    end
+
+    test_scores[p] = mean(cross_validate(fit, test, num_samples, cv))
+
+  end
+
+  num_edges = length(edge_info[:edge])
+  actual_coefs_mat::Matrix{Float64} = zeros(Float64, n_folds, num_edges)
+
+  fit, test = begin
+    state = Dict(:call_num=>0)
+    fit_callback() = begin
+      state[:call_num] = state[:call_num] + 1
+      actual_coefs_mat[state[:call_num], :] = svr[:coef_]
+    end
+    fit_and_test_gen(y, fit_callback)
+  end
+
+  edge_info[:coef] = mean(actual_coefs_mat, 1)[:]::Vector{Float64}
+
+  actual_score=mean(cross_validate(fit, test, num_samples, cv))
+  perm_scores = sort(test_scores, rev=true)
+  actual_score_rank=sum(perm_scores .> actual_score) + 1
+
+  perm_info = DataFrame(perm_score=perm_scores,
+                        actual_score=actual_score,
+                        actual_score_rank=actual_score_rank,
+                        pos_perm_coef=sort(pos_perm_coefs, rev=true),
+                        neg_perm_coef=sort(neg_perm_coefs))
+
+  Dict(:edge_info => edge_info,
+       :perm_info => perm_info)
+
+end
+
+
+function calc_coefs()
+  cs = Dict(adw => Dict(left_select => 1e-2),
+            atw => Dict(left_select => 1e-2),)
+end
+
+
+function save_calc_coefs()
 end
