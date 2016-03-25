@@ -2,41 +2,8 @@ using DataFrames
 using GLM
 using Memoize
 using PValueAdjust
-using PyCall
 
-@enum MeasureGroup atw adw
-
-full_adw = readtable("data/step3/full_adw.csv")
-full_atw = readtable("data/step3/full_atw.csv")
-
-jhu = readtable("data/jhu_coords.csv")
-
-jhu_left = readtable("data/jhu_rois_left.csv")
-jhu_left_names = Set(jhu_left[:name])
-
-jhu_left_select = readtable("data/jhu_rois_left_adjusted.csv")
-jhu_left_select_names = Set(jhu_left_select[:name])
-
-
-function get_edges(df::DataFrame)
-  filter(n -> startswith(string(n), "x"), names(df))
-end
-
-edge_reg = r"x([0-9]+)_([0-9]+)"
-
-
-@memoize function edge_col_to_x(edge::Symbol, x::Symbol)
-  m = match(edge_reg, string(edge))
-  map([1, 2]) do i
-    ix = parse(Int64, m[i]) + 1
-    jhu[ix, x]
-  end
-end
-
-
-@memoize function edge_col_to_roi_names(edge::Symbol)
-  edge_col_to_x(edge, :name)
-end
+include("helpers.jl")
 
 
 @memoize function mk_edge_string(edge::Symbol)
@@ -121,18 +88,6 @@ function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
 end
 
 
-@memoize function is_left_hemi_edge(edge_col::Symbol)
-  a, b = edge_col_to_roi_names(edge_col)
-  in(a, jhu_left_names) & in(b, jhu_left_names)
-end
-
-
-@memoize function is_left_hemi_select_edge(edge_col::Symbol)
-  a, b = edge_col_to_roi_names(edge_col)
-  in(a, jhu_left_select_names) & in(b, jhu_left_select_names)
-end
-
-
 type DataTarget
   full::DataFrame
   target::Symbol
@@ -189,23 +144,16 @@ function update_expr(e::Expr, old_term, new_term)
 end
 
 
-macro eval_str(s)
-  quote
-    eval(parse($s))
-  end
-end
-
-
 macro calc_all_measures()
   quote
     function calc_dt_diff(m::MeasureGroup)
-      full = @eval_str "full_$m"
+      full = @eval_str "full_$m()"
       target = @eval_str ":$(m)_diff_wpm"
       DataTarget(full, target, rows_filter=rows_filter_gen(m))
     end
 
     function calc_dt_covar(m::MeasureGroup)
-      full = @eval_str "full_$m"
+      full = @eval_str "full_$m()"
       target = @eval_str ":se_$m"
       covars = @eval_str "[:pd_$m]"
       DataTarget(full, target, covars=covars, rows_filter = rows_filter_gen(m))
@@ -267,11 +215,4 @@ function save_all_scenarios(res::Dict)
     end
     save_calc_scenario_results(sr, dir)
   end
-end
-
-
-function load_local_py(name)
-  (name, ext) = rsplit(name, '.';limit=2)
-  (file, filename, data) = imp.find_module(name, ["."])
-  imp.load_module(name, file, filename, data)
 end
