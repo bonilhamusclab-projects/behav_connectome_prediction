@@ -21,7 +21,7 @@ end
 
 function get_Xy(m::MeasureGroup, t::Target;
                 region::Region=full_brain,
-                group::SubjectGroup=all_subjects)
+                subject_group::SubjectGroup=all_subjects)
   full::DataFrame = @eval_str "full_$m()"
   target::Symbol = begin
     str = @switch t begin
@@ -31,7 +31,7 @@ function get_Xy(m::MeasureGroup, t::Target;
     @eval_str str
   end
 
-  subject_rows::Vector{Bool} = subject_filter_gen_gen(group)(m)(full)
+  subject_rows::Vector{Bool} = subject_filter_gen_gen(subject_group)(m)(full)
 
   X::Matrix{Float64} = begin
     edges::Vector{Symbol} = get_edges(full, region=region)
@@ -85,10 +85,11 @@ function learning_curve(svr::PyObject,
                         cv_gen::Function,
                         m::MeasureGroup,
                         region::Region,
+                        subject_group::SubjectGroup,
                         train_ratios::AbstractVector{Float64}=1./6:1./6:1.;
                         score_fn::Function=r2_score)
 
-  X, y = get_Xy(m, diff_wpm, region=region)
+  X, y = get_Xy(m, diff_wpm, region=region, subject_group=subject_group)
   num_samples::Int64 = length(y)
 
   train_sizes::Vector{Int64} = ratios_to_counts(train_ratios, num_samples)
@@ -142,12 +143,13 @@ end
 function learning_curve(m::MeasureGroup;
                         region::Region=left_select,
                         C=1.0,
+                        subject_group::SubjectGroup=all_subjects,
                         seed::Nullable{Int}=Nullable(1234))
   isnull(seed) || srand(get(seed))
 
   svr = LinearSVR(C=C)
   cv_gen = cv_gen_gen(RandomSub, 25)
-  learning_curve(svr, cv_gen, m, region)
+  learning_curve(svr, cv_gen, m, region, subject_group)
 end
 
 
@@ -155,12 +157,12 @@ function calc_coefs(m::MeasureGroup,
                     C::Float64,
                     target::Target,
                     region::Region;
-                    group::SubjectGroup=all_subjects,
+                    subject_group::SubjectGroup=all_subjects,
                     n_folds::Int64=25,
-                    n_perms::Int64 = 100)
+                    n_perms::Int64=100)
   X::Matrix{Float64}, y::Vector{Float64} = get_Xy(m, target;
                                                   region=region,
-                                                  group=group)
+                                                  subject_group=subject_group)
 
   num_samples::Int64 = length(y)
 
@@ -170,10 +172,7 @@ function calc_coefs(m::MeasureGroup,
   pos_perm_coefs = zeros(Float64, n_perms)
   neg_perm_coefs = zeros(Float64, n_perms)
   test_scores = zeros(Float64, n_perms)
-
-  edge_info = DataFrame()
-  edge_info[:edge] = get_edges(m, region)
-  edge_info[:edge_name] = map(mk_edge_string, edge_info[:edge])
+  edges = get_edges(m, region)
 
   function fit_and_test_gen(ys::Vector{Float64},
                             fit_callback::Function)
@@ -207,8 +206,7 @@ function calc_coefs(m::MeasureGroup,
 
   end
 
-  num_edges = length(edge_info[:edge])
-  actual_coefs_mat::Matrix{Float64} = zeros(Float64, n_folds, num_edges)
+  actual_coefs_mat::Matrix{Float64} = zeros(Float64, n_folds, length(edges))
 
   fit, test = begin
     state = Dict(:call_num=>0)
@@ -219,17 +217,31 @@ function calc_coefs(m::MeasureGroup,
     fit_and_test_gen(y, fit_callback)
   end
 
-  edge_info[:coef] = mean(actual_coefs_mat, 1)[:]::Vector{Float64}
-
   actual_score=mean(cross_validate(fit, test, num_samples, cv))
-  perm_scores = sort(test_scores, rev=true)
-  actual_score_rank=sum(perm_scores .> actual_score) + 1
 
-  perm_info = DataFrame(perm_score=perm_scores,
-                        actual_score=actual_score,
-                        actual_score_rank=actual_score_rank,
-                        pos_perm_coef=sort(pos_perm_coefs, rev=true),
-                        neg_perm_coef=sort(neg_perm_coefs))
+  perm_info::DataFrame = begin
+    perm_scores = sort(test_scores, rev=true)
+    actual_score_rank=searchsortedfirst(perm_scores, actual_score, rev=true)
+
+    DataFrame(perm_score=perm_scores,
+              actual_score=actual_score,
+              actual_score_rank=actual_score_rank,
+              pos_perm_coef=sort(pos_perm_coefs, rev=true),
+              neg_perm_coef=sort(neg_perm_coefs))
+  end
+
+  edge_info::DataFrame = begin
+    ei = DataFrame()
+    ei[:edge] = edges
+    ei[:edge_name] = map(mk_edge_string, ei[:edge])
+    ei[:coef] = mean(actual_coefs_mat, 1)[:]::Vector{Float64}
+
+    ei[:pos_rank] = [searchsortedfirst(perm_info[:pos_perm_coef], c, rev=true)
+                     for c in ei[:coef]]
+    ei[:neg_rank] = [searchsortedfirst(perm_info[:neg_perm_coef], c)
+                     for c in ei[:coef]]
+    sort(ei, cols=:coef)
+  end
 
   Dict(:edge_info => edge_info,
        :perm_info => perm_info)
@@ -237,11 +249,41 @@ function calc_coefs(m::MeasureGroup,
 end
 
 
-function calc_coefs()
+function calc_all_coefs()
   cs = Dict(adw => Dict(left_select => 1e-2),
-            atw => Dict(left_select => 1e-2),)
+            atw => Dict(left_select => 1e-2))
+
+  s_groups = SubjectGroup[all_subjects, improved, poor_pd]
+
+  ret = Dict()
+  for g in s_groups
+    println(g)
+    ret[g] = Dict()
+    for m in keys(cs)
+      ret[g][m] = Dict()
+      for r in keys(cs[m])
+        ret[g][m][r] = calc_coefs(m, cs[m][r], diff_wpm, r, group=g)
+      end
+    end
+  end
+
+  ret
+
 end
 
 
-function save_calc_coefs()
+function save_calc_coefs(calc_all_coefs_ret::Dict)
+  for s::SubjectGroup in keys(ret)
+    dir = joinpath("data/step4/svr/", "$s")
+    isdir(dir) || mkpath(dir)
+    for m::MeasureGroup in keys(ret[s])
+      for r::Region in keys(ret[s][m])
+        for k::Symbol in keys(ret[s][m][r])
+          f_name = "$(m)_$(r)_$(k)s.csv"
+          println(f_name)
+          writetable(joinpath(dir, f_name), ret[s][m][r][k])
+        end
+      end
+    end
+  end
 end

@@ -194,7 +194,7 @@ end
 
 function save_all_scenarios(res::Dict)
   for (sk, sr) in res
-    dir = joinpath("data/step4/scenarios/", "$sk")
+    dir = joinpath("data/step4/linear_reg/", "$sk")
     isdir(dir) || mkpath(dir)
 
     save_calc_scenario_results(sr, dir)
