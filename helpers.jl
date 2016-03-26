@@ -22,20 +22,19 @@ end
 end
 
 
-@memoize function region_filter_gen(region::Region)
+@memoize function region_filter(region::Region, edges::Vector{Symbol})
   @switch region begin
-    left_select; is_left_hemi_select_edge
-    left; is_left_hemi_edge
-    full_brain; edge::Symbol -> true
+    left_select; filter(is_left_hemi_select_edge, edges)
+    left; filter(is_left_hemi_edge, edges)
+    full_brain; filter(e::Symbol -> true, edges)
   end
 end
 
 
 function get_edges(df::DataFrame; region::Region=full_brain)
   edge_filter(n::Symbol) = startswith(string(n), "x")
-  region_filter = region_filter_gen(region)
 
-  filter(n::Symbol -> edge_filter(n) && region_filter(n), names(df))
+  region_filter(region, filter(edge_filter, names(df)))
 end
 
 
@@ -93,7 +92,7 @@ function create_edge_names(edges::Vector{Symbol})
 end
 
 
-@memoize function target_col(t::Target, m::MeasureGroup)
+@memoize function get_target_col(t::Target, m::MeasureGroup)
   @switch t begin
     se; symbol("$(t)_$m")
     diff_wpm; symbol("$(m)_$t")
@@ -106,5 +105,21 @@ end
     all_subjects; m::MeasureGroup -> d::DataFrame -> repmat([true], size(d, 1))
     improved; m::MeasureGroup -> d::DataFrame -> d[symbol(m, "_diff_wpm")] .> 0
     poor_pd; m::MeasureGroup -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 0
+  end
+end
+
+
+@memoize subject_filter_gen(s::SubjectGroup, m::MeasureGroup) =
+  subject_filter_gen_gen(s)(m)
+
+
+@memoize subject_filter(s::SubjectGroup, m::MeasureGroup, df::DataFrame) =
+  subject_filter_gen_gen(s)(m)(df)
+
+
+@memoize covars_for_target(t::Target, m::MeasureGroup) = begin
+  @switch t begin
+    se; Symbol[symbol("pd_$(m)")]
+    diff_wpm; Symbol[]
   end
 end

@@ -12,7 +12,6 @@ macro update_covar(k, v)
   )
 end
 
-
 function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
                     covars::Vector{Symbol}=Symbol[])
 
@@ -77,100 +76,86 @@ function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
 end
 
 
-type DataTarget
-  full::DataFrame
-  target::Symbol
-  covars::Vector{Symbol}
-  rows_filter::Function
+type DataInfo
+  measure_group::MeasureGroup
+  target::Target
+  subject_group::SubjectGroup
+  region::Region
 end
 
+get_full(d::DataInfo) = @eval_str "full_$(d.measure_group)()"
 
-DataTarget(full::DataFrame, target::Symbol;
-           covars::Vector{Symbol}=Symbol[],
-           rows_filter::Function=df -> repmat([true], size(df, 1))) =
-  DataTarget(full, target, covars, rows_filter)
+get_covars(d::DataInfo) = covars_for_target(d.target, d.measure_group)
+get_edges(d::DataInfo) = get_edges(d.measure_group, d.region)
+get_target_col(d::DataInfo) = get_target_col(d.target, d.measure_group)
+get_valid_rows(d::DataInfo) = subject_filter(
+  d.subject_group, d.measure_group, get_full(d))
 
-Base.start(d::DataTarget) = 1
-Base.getindex(d::DataTarget, s::Symbol) = d.(s)
-Base.next(d::DataTarget, state) = d[fieldnames(DataTarget)[state]], state + 1
-Base.done(d::DataTarget, state) = state > length(fieldnames(DataTarget))
+get_data(d::DataInfo) = begin
+  target_col::Symbol = get_target_col(d)
+  covars::Vector{Symbol} = get_covars(d)
+  edges::Vector{Symbol} = get_edges(d)
+  valid_rows::Vector{Bool} = get_valid_rows(d)
+  full::DataFrame = get_full(d)
 
-function calc_all_measures(data_targets::Vector{DataTarget})
+  (full[valid_rows, [edges; covars; target_col]], edges, covars, target_col)
+end
+
+to_string(d::DataInfo) = join(
+  ["$(d.measure_group)_$(d.subject_group)_$(d.region)"; get_covars(d)],
+  "_cv_")
+
+Base.start(d::DataInfo) = 1
+Base.getindex(d::DataInfo, s::Symbol) = d.(s)
+Base.next(d::DataInfo, state) = d[fieldnames(DataTarget)[state]], state + 1
+Base.done(d::DataInfo, state) = state > length(fieldnames(DataTarget))
+
+function calc_all_measures(data_targets::Vector{DataInfo})
 
   ret = Dict()
 
-  for (data, target, covars, rows_filter) in data_targets
+  for d::DataInfo in data_targets
+    data::DataFrame, edges::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
+      get_data(d)
 
-    valid_rows::Vector{Bool} = rows_filter(data)
-    data = data[valid_rows, :]
+    coefs = calc_coefs(data, target_col, edges, covars)
 
-    function calc_sorted(edges::Vector{Symbol})
-      sort(calc_coefs(data, target, edges, covars), cols=:pvalue)
-    end
+    d_string = to_string(d)
+    println(d_string)
 
-    edges = get_edges(data)
-
-    k::Symbol = symbol(join([target; covars], "_cv_"))
-    println(k)
-
-    ret[k] = calc_sorted(edges)
-
-    println("left")
-    ret[symbol(k, "_left")] = calc_sorted(filter(is_left_hemi_edge, edges))
-
-    println("left select")
-    ret[symbol(k, "_left_select")] = calc_sorted(filter(is_left_hemi_select_edge, edges))
+    ret[symbol(d_string)] = sort(coefs, cols=:pvalue)
   end
 
   ret
 end
 
 
-function update_expr(e::Expr, old_term, new_term)
-  parse(replace(
-          string(e), old_term, new_term
-          ))
-end
-
-
 macro calc_all_measures()
   quote
-    function calc_dt_diff(m::MeasureGroup)
-      full = @eval_str "full_$m()"
-      target = @eval_str ":$(m)_diff_wpm"
-      DataTarget(full, target, rows_filter=subject_filter_gen(m))
-    end
-
-    function calc_dt_covar(m::MeasureGroup)
-      full = @eval_str "full_$m()"
-      target = @eval_str ":se_$m"
-      covars = @eval_str "[:pd_$m]"
-      DataTarget(full, target, covars=covars, rows_filter =subject_filter_gen(m))
-    end
-
-    data_targets = [calc_dt_covar(adw), calc_dt_covar(atw),
-                    calc_dt_diff(adw), calc_dt_diff(atw)]
+    data_targets = [DataInfo(m, t; subject_group=s)
+                    for m::MeasureGroup in (atw, adw),
+                    t::Target in (se, diff_wpm)]
     calc_all_measures(data_targets)
   end
 end
 
 
-function calc_scenario_all()
-  subject_filter_gen = subject_filter_gen_gen(all_subjects)
+function calc_all_subjects()
+  s::SubjectGroup= all_subjects
 
   @calc_all_measures
 end
 
 
 function calc_scenario_improved()
-  subject_filter_gen = subject_filter_gen_gen(improved)
+  s::SubjectGroup = improved
 
   @calc_all_measures
 end
 
 
 function calc_scenario_poor_pd()
-  subject_filter_gen = subject_filter_gen_gen(poor_pd)
+  s::SubjectGroup = poor_pd
 
   @calc_all_measures
 end

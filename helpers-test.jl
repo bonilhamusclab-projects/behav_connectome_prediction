@@ -53,7 +53,12 @@ poor_pd_atw_filter, poor_pd_adw_filter = map(poor_pd_filter_gen, [atw, adw])
 @test poor_pd_adw_filter(full_adw()) == (full_adw()[:pd_adw_z] .< 0)
 
 
-@test target_col(diff_wpm, atw) == :atw_diff_wpm
-@test target_col(diff_wpm, adw) == :adw_diff_wpm
-@test target_col(se, atw) == :se_atw
-@test target_col(se, adw) == :se_adw
+@test get_target_col(diff_wpm, atw) == :atw_diff_wpm
+@test get_target_col(diff_wpm, adw) == :adw_diff_wpm
+@test get_target_col(se, atw) == :se_atw
+@test get_target_col(se, adw) == :se_adw
+
+@test covars_for_target(se, atw) == [:pd_atw]
+@test covars_for_target(se, adw) == [:pd_adw]
+@test covars_for_target(diff_wpm, atw) == Symbol[]
+@test covars_for_target(diff_wpm, adw) == Symbol[]
