@@ -102,7 +102,7 @@ get_data(d::DataInfo) = begin
 end
 
 to_string(d::DataInfo) = join(
-  ["$(d.measure_group)_$(d.subject_group)_$(d.region)"; get_covars(d)],
+  ["$(d.measure_group)_$(d.subject_group)_$(d.region)_$(d.target)"; get_covars(d)],
   "_cv_")
 
 Base.start(d::DataInfo) = 1
@@ -115,13 +115,13 @@ function calc_all_measures(data_targets::Vector{DataInfo})
   ret = Dict()
 
   for d::DataInfo in data_targets
+    d_string = to_string(d)
+    println(d_string)
+
     data::DataFrame, edges::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
       get_data(d)
 
     coefs = calc_coefs(data, target_col, edges, covars)
-
-    d_string = to_string(d)
-    println(d_string)
 
     ret[symbol(d_string)] = sort(coefs, cols=:pvalue)
   end
@@ -132,9 +132,11 @@ end
 
 macro calc_all_measures()
   quote
-    data_targets = [DataInfo(m, t; subject_group=s)
-                    for m::MeasureGroup in (atw, adw),
-                    t::Target in (se, diff_wpm)]
+    data_targets::Vector{DataInfo} =
+      [DataInfo(m, t, s, r)
+       for m::MeasureGroup in (atw, adw),
+       t::Target in (se, diff_wpm),
+       r::Region in (full_brain, left, left_select)][:]
     calc_all_measures(data_targets)
   end
 end
@@ -147,14 +149,14 @@ function calc_all_subjects()
 end
 
 
-function calc_scenario_improved()
+function calc_improved_subjects()
   s::SubjectGroup = improved
 
   @calc_all_measures
 end
 
 
-function calc_scenario_poor_pd()
+function calc_poor_pd_subjects()
   s::SubjectGroup = poor_pd
 
   @calc_all_measures
@@ -163,9 +165,9 @@ end
 
 function calc_all_scenarios()
   ret = Dict()
-  ret[all_subjects] = calc_scenario_all()
-  ret[improved] = calc_scenario_improved()
-  ret[poor_pd] = calc_scenario_poor_pd()
+  ret[all_subjects] = calc_all_subjects()
+  ret[improved] = calc_improved_subjects()
+  ret[poor_pd] = calc_poor_pd_subjects()
   ret
 end
 
