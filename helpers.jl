@@ -93,6 +93,14 @@ function create_edge_names(edges::Vector{Symbol})
 end
 
 
+@memoize function target_col(t::Target, m::MeasureGroup)
+  @switch t begin
+    se; symbol("$(t)_$m")
+    diff_wpm; symbol("$(m)_$t")
+  end
+end
+
+
 @memoize function subject_filter_gen_gen(s::SubjectGroup)
   @switch s begin
     all_subjects; m::MeasureGroup -> d::DataFrame -> repmat([true], size(d, 1))
