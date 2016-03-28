@@ -3,18 +3,22 @@ using Lazy
 using MLBase
 using PyCall
 
+include("DataInfo.jl")
 include("helpers.jl")
 
 @pyimport sklearn.svm as svm
 LinearSVR = svm.LinearSVR
 
 
+macro l2_from_true(x)
+  :(sum( (y_true - $x).^2))
+end
+
 function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
-  numerator::Float64 = sum( (y_true - y_pred).^2 )
-  denominator::Float64 = begin
-    y_mn = mean(y_true)
-    sum( (y_true .- y_mn).^2 )
-  end
+
+  numerator::Float64 = @l2_from_true y_pred
+  denominator::Float64 = @l2_from_true mean(y_true)
+
   1 - numerator/denominator
 end
 
@@ -29,7 +33,7 @@ end
 function pred_diff(m::MeasureGroup)
   svr = LinearSVR()
 
-  X, y = get_Xy(diff_wpm, m, diff_wpm)
+  X, y = get_Xy_mat(m, diff_wpm)
 
   fit(inds::Vector{Int64}) = svr[:fit](X[inds, :], y[inds])
 
@@ -46,9 +50,10 @@ end
 
 
 function num_samples(cv::CrossValGenerator)
-  @switch isa(x, _) begin
-    Kfold; length(x.permseq)
-    x.n
+  @switch isa(cv, _) begin
+    Kfold; length(cv.permseq)
+    StratifiedRandomSub; sum(map(length, cv.idxs))
+    cv.n
   end
 end
 
@@ -70,10 +75,11 @@ function learning_curve(svr::PyObject,
                         train_ratios::AbstractVector{Float64}=1./6:1./6:1.;
                         score_fn::Function=r2_score)
 
-  X, y = get_Xy(m, diff_wpm, region=region, subject_group=subject_group)
+  X, y = get_Xy_mat(m, diff_wpm, region=region, subject_group=subject_group)
   num_samples::Int64 = length(y)
 
   train_sizes::Vector{Int64} = ratios_to_counts(train_ratios, num_samples)
+  train_sizes = train_sizes[train_sizes .> 2]
 
   ret::DataFrame = begin
     mk_zeros = () -> zeros(Float64, length(train_sizes))
@@ -130,22 +136,19 @@ function learning_curve(m::MeasureGroup;
                         seed::Nullable{Int}=Nullable(1234))
   isnull(seed) || srand(get(seed))
 
+  di = DataInfo(m, diff_wpm, subject_group, region)
+
   svr = LinearSVR(C=C)
   lc_cvg_gen = cvg_gen_gen(RandomSub, 25)
   learning_curve(svr, lc_cvg_gen, m, region, subject_group)
 end
 
 
-function calc_coefs(m::MeasureGroup,
-                    C::Float64,
-                    target::Target,
-                    region::Region;
-                    subject_group::SubjectGroup=all_subjects,
+function calc_coefs(d::DataInfo,
+                    C::Float64;
                     n_folds::Int64=25,
                     n_perms::Int64=100)
-  X::Matrix{Float64}, y::Vector{Float64} = get_Xy(m, target;
-                                                  region=region,
-                                                  subject_group=subject_group)
+  X::Matrix{Float64}, y::Vector{Float64} = get_Xy_mat(d)
 
   num_samples::Int64 = length(y)
 

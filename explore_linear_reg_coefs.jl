@@ -3,6 +3,7 @@ using GLM
 using Memoize
 using PValueAdjust
 
+include("DataInfo.jl")
 include("helpers.jl")
 
 

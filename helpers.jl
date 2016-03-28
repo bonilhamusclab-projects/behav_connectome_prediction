@@ -8,7 +8,7 @@ using Memoize
 
 @enum Region left_select left full_brain
 
-@enum SubjectGroup poor_pd improved all_subjects
+@enum SubjectGroup poor_pd improved all_subjects poor_pd_1
 
 @memoize function is_left_hemi_edge(edge_col::Symbol)
   a, b = edge_col_to_roi_names(edge_col)
@@ -105,6 +105,7 @@ end
     all_subjects; m::MeasureGroup -> d::DataFrame -> repmat([true], size(d, 1))
     improved; m::MeasureGroup -> d::DataFrame -> d[symbol(m, "_diff_wpm")] .> 0
     poor_pd; m::MeasureGroup -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 0
+    poor_pd_1; m::MeasureGroup -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 1
   end
 end
 

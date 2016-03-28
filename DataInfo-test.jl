@@ -57,3 +57,44 @@ test_fn = test_get_Xy_mat
 
 
 @test_all_combos
+
+
+create_was_called() = Dict([ i => false for i in
+                   [adw, atw,
+                    diff_wpm, se,
+                    all_subjects, improved, poor_pd, poor_pd_1,
+                    full_brain, left_select, left] ])
+
+was_called = create_was_called()
+
+update_was_called(di::DataInfo) = begin
+  for f in fieldnames(di)
+    was_called[di.(f)] = true
+  end
+  di
+end
+
+for_all_combos(fn=update_was_called)
+
+for k in keys(was_called)
+  @test was_called[k]
+end
+
+was_called = create_was_called()
+
+filter_vals = Dict(SubjectGroup => [all_subjects],
+                   MeasureGroup => [adw],
+                   Target => [diff_wpm],
+                   Region => [left_select])
+
+for_all_combos(fn=update_was_called,
+               subject_groups=filter_vals[SubjectGroup],
+               measure_groups=filter_vals[MeasureGroup],
+               targets=filter_vals[Target],
+               regions=filter_vals[Region]
+               )
+
+for k in keys(was_called)
+  expected = in(k, filter_vals[typeof(k)])
+  @test was_called[k] == expected
+end
