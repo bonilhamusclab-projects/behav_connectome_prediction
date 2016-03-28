@@ -1,9 +1,8 @@
 using Base.Test
 
-include("explore_linear_reg_coefs.jl")
+include("DataInfo.jl")
 include("helpers.jl")
 include("test_utils.jl")
-
 
 
 function test_get_data(di::DataInfo,
@@ -19,7 +18,7 @@ function test_get_data(di::DataInfo,
   @test size(data) == (expected_num_rows, expected_num_edges + length(expected_covars) + 1)
 end
 
-test_fn(measure::MeasureGroup,
+test_get_data(measure::MeasureGroup,
         subject_group::SubjectGroup,
         s_count::Int64,
         region::Region,
@@ -32,5 +31,29 @@ test_fn(measure::MeasureGroup,
   target_col = symbol(target, "_", measure)
   test_get_data(di, s_count, target_col, covars, e_count)
 end
+
+test_fn = test_get_data
+
+@test_all_combos
+
+
+test_get_Xy_mat(measure::MeasureGroup,
+        subject_group::SubjectGroup,
+        s_count::Int64,
+        region::Region,
+        e_count::Int64,
+        target::Target,
+        covars::Vector{Symbol}) = begin
+  di = DataInfo(measure, target, subject_group, region)
+  X, y = get_Xy_mat(di)
+
+  @test size(X) == (s_count, e_count)
+  @test length(y) == s_count
+  @test isa(X, Matrix{Float64})
+  @test isa(y, Vector{Float64})
+end
+
+test_fn = test_get_Xy_mat
+
 
 @test_all_combos

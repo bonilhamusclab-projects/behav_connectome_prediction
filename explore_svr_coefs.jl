@@ -19,23 +19,10 @@ function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
 end
 
 
-function get_Xy(m::MeasureGroup, target::Target;
+function get_Xy_mat(m::MeasureGroup, target::Target;
                 region::Region=full_brain,
                 subject_group::SubjectGroup=all_subjects)
-  full::DataFrame = @eval_str "full_$m()"
-
-  target_col::Symbol = get_target_col(target, m)
-
-  subject_rows::Vector{Bool} = subject_filter(subject_group, m, full)
-
-  X::Matrix{Float64} = begin
-    edges::Vector{Symbol} = get_edges(full, region=region)
-    Matrix(full[subject_rows, edges])
-  end
-
-  y::Vector{Float64} = Array(full[subject_rows, target_col])
-
-  X, y
+  get_Xy_mat(DataInfo(m, target, subject_group, region))
 end
 
 
@@ -76,7 +63,7 @@ end
 
 
 function learning_curve(svr::PyObject,
-                        cv_gen::Function,
+                        lc_cvg_gen::Function,
                         m::MeasureGroup,
                         region::Region,
                         subject_group::SubjectGroup,
@@ -102,7 +89,7 @@ function learning_curve(svr::PyObject,
     score_fn(y[inds], c[:predict](X[inds, :]))
 
   for (ix, t) in enumerate(train_sizes)
-    cv::CrossValGenerator = cv_gen(t)
+    cvg::CrossValGenerator = lc_cvg_gen(t)
 
     train_scores = Float64[]
 
@@ -113,7 +100,7 @@ function learning_curve(svr::PyObject,
       svr
     end
 
-    test_scores = cross_validate(fit, test, t, cv)
+    test_scores = cross_validate(fit, test, t, cvg)
 
     ret[ix, :train_mn] = mean(train_scores)
     ret[ix, :train_std] = std(train_scores)
@@ -125,13 +112,15 @@ function learning_curve(svr::PyObject,
 end
 
 
-function cv_gen_gen(cv::Type, n_folds::Int64)
-  @assert cv <: CrossValGenerator
-  @switch cv begin
-    Kfold; (n::Int64) -> Kfold(n, n_folds)
-    RandomSub; (n::Int64) -> RandomSub(n, round(Int64, .8 * n), n_folds)
+function cvg_gen_gen(cvgT::Type, n_folds::Int64)
+  @assert cvgT <: CrossValGenerator
+  @switch cvgT begin
+    Kfold; (n_samples::Int64) -> Kfold(n_samples, n_folds)
+    RandomSub; (n_samples::Int64) -> RandomSub(n_samples, round(Int64, .8 * n_samples), n_folds)
   end
 end
+
+cvg_gen(cvgT::Type, n_folds::Int64, n_samples::Int64) = cvg_gen_gen(cvgT, n_folds)(n_samples)
 
 
 function learning_curve(m::MeasureGroup;
@@ -142,8 +131,8 @@ function learning_curve(m::MeasureGroup;
   isnull(seed) || srand(get(seed))
 
   svr = LinearSVR(C=C)
-  cv_gen = cv_gen_gen(RandomSub, 25)
-  learning_curve(svr, cv_gen, m, region, subject_group)
+  lc_cvg_gen = cvg_gen_gen(RandomSub, 25)
+  learning_curve(svr, lc_cvg_gen, m, region, subject_group)
 end
 
 
@@ -161,7 +150,7 @@ function calc_coefs(m::MeasureGroup,
   num_samples::Int64 = length(y)
 
   svr = LinearSVR(C=C)
-  cv::CrossValGenerator = cv_gen_gen(RandomSub, n_folds)(num_samples)
+  cvg::CrossValGenerator = cvg_gen(RandomSub, n_folds, num_samples)
 
   pos_perm_coefs = zeros(Float64, n_perms)
   neg_perm_coefs = zeros(Float64, n_perms)
@@ -196,7 +185,7 @@ function calc_coefs(m::MeasureGroup,
       fit_and_test_gen(y_shuf, fit_callback)
     end
 
-    test_scores[p] = mean(cross_validate(fit, test, num_samples, cv))
+    test_scores[p] = mean(cross_validate(fit, test, num_samples, cvg))
 
   end
 
@@ -211,7 +200,7 @@ function calc_coefs(m::MeasureGroup,
     fit_and_test_gen(y, fit_callback)
   end
 
-  actual_score=mean(cross_validate(fit, test, num_samples, cv))
+  actual_score=mean(cross_validate(fit, test, num_samples, cvg))
 
   perm_info::DataFrame = begin
     perm_scores = sort(test_scores, rev=true)
