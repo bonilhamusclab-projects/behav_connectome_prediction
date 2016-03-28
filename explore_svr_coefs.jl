@@ -19,27 +19,21 @@ function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
 end
 
 
-function get_Xy(m::MeasureGroup, t::Target;
+function get_Xy(m::MeasureGroup, target::Target;
                 region::Region=full_brain,
                 subject_group::SubjectGroup=all_subjects)
   full::DataFrame = @eval_str "full_$m()"
-  target::Symbol = begin
-    str = @switch t begin
-      diff_wpm; ":$(m)_diff_wpm"
-      se; ":se_$m"
-    end
-    @eval_str str
-  end
 
-  subject_rows::Vector{Bool} = subject_filter_gen_gen(subject_group)(m)(full)
+  target_col::Symbol = get_target_col(target, m)
+
+  subject_rows::Vector{Bool} = subject_filter(subject_group, m, full)
 
   X::Matrix{Float64} = begin
     edges::Vector{Symbol} = get_edges(full, region=region)
     Matrix(full[subject_rows, edges])
   end
-  y::Vector{Float64} = begin
-    Array(full[subject_rows, target])
-  end
+
+  y::Vector{Float64} = Array(full[subject_rows, target_col])
 
   X, y
 end
