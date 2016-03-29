@@ -165,7 +165,7 @@ function calc_coefs(d::DataInfo,
   pos_perm_coefs = zeros(Float64, n_perms)
   neg_perm_coefs = zeros(Float64, n_perms)
   test_scores = zeros(Float64, n_perms)
-  edges = get_edges(m, region)
+  edges = get_edges(d)
 
   function fit_and_test_gen(ys::Vector{Float64},
                             fit_callback::Function)
@@ -247,7 +247,7 @@ function calc_all_coefs(cs::Dict{DataInfo, Float64})
   ret = Dict{DataInfo, Dict{Symbol, DataFrame}}()
   for (di::DataInfo, C::Float64) in cs
     println(di)
-    ret[di] = calc_coefs(m, di, C)
+    ret[di] = calc_coefs(di, C)
   end
 
   ret
@@ -255,18 +255,14 @@ function calc_all_coefs(cs::Dict{DataInfo, Float64})
 end
 
 
-function save_calc_coefs(calc_all_coefs_ret::Dict)
-  for s::SubjectGroup in keys(ret)
-    dir = joinpath("data/step4/svr/", "$s")
+function save_calc_coefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, DataFrame}})
+  for di::DataInfo in keys(calc_all_coefs_ret)
+    dir = joinpath("data/step4/svr/")
     isdir(dir) || mkpath(dir)
-    for m::MeasureGroup in keys(ret[s])
-      for r::Region in keys(ret[s][m])
-        for k::Symbol in keys(ret[s][m][r])
-          f_name = "$(m)_$(r)_$(k)s.csv"
-          println(f_name)
-          writetable(joinpath(dir, f_name), ret[s][m][r][k])
-        end
-      end
+    for (k::Symbol, data::DataFrame) in ret[di]
+      f_name = "$(di)_$(k)s.csv"
+      println(f_name)
+      writetable(joinpath(dir, f_name), data)
     end
   end
 end
