@@ -1,5 +1,6 @@
 using Colors
 using DataFrames
+using HypothesisTests
 using Lazy
 using MLBase
 using PyCall
@@ -153,91 +154,78 @@ end
 
 function calc_coefs(d::DataInfo,
                     C::Float64;
-                    n_folds::Int64=25,
-                    n_perms::Int64=100)
+                    n_perms::Int64=1000,
+                    seed::Nullable{Int}=Nullable(1234))
+
+  isnull(seed) || srand(get(seed))
+
   X::Matrix{Float64}, y::Vector{Float64} = get_Xy_mat(d)
 
   num_samples::Int64 = length(y)
 
   svr = LinearSVR(C=C)
-  cvg::CrossValGenerator = cvg_gen(RandomSub, n_folds, num_samples)
+  cvg::CrossValGenerator = cvg_gen(RandomSub, n_perms, num_samples)
 
-  pos_perm_coefs = zeros(Float64, n_perms)
-  neg_perm_coefs = zeros(Float64, n_perms)
-  test_scores = zeros(Float64, n_perms)
   edges = get_edges(d)
+  n_edges = length(edges)
 
-  function fit_and_test_gen(ys::Vector{Float64},
-                            fit_callback::Function)
+  coefs::DataFrame = begin
+    ret = DataFrame()
+    for e in edges
+      ###Hack to keep it float64 while being NA
+      ret[e] = repmat([-Inf], n_perms)
+      ret[ret[e] .== -Inf, :] = NA
+    end
+    ret
+  end
 
-    fit(inds::Vector{Int64}) = begin
-      svr[:fit](X[inds, :], ys[inds])
-      fit_callback()
+  fit, test = begin
+
+    state = Dict(:fit_call => 0)
+
+    fit_fn(inds::Vector{Int64}) = begin
+      state[:fit_call] += 1
+      println(state[:fit_call])
+      svr[:fit](X[inds, :], y[inds])
+      for (ix, c) in enumerate(svr[:coef_])
+        coefs[state[:fit_call], edges[ix]] = c
+      end
       svr
     end
 
-    test(c::PyObject, inds::Vector{Int64}) =
-      r2_score(ys[inds], c[:predict](X[inds, :]))
+    test_fn(c::PyObject, inds::Vector{Int64}) =
+      r2_score(y[inds], c[:predict](X[inds, :]))
 
-    (fit, test)
+    (fit_fn, test_fn)
   end
 
-  for p::Int64 in 1:n_perms
-    y_shuf = shuffle(y)
-    pos_perm_coefs[p] = -Inf
-    neg_perm_coefs[p] = Inf
+  test_scores::Vector{Float64} = cross_validate(fit, test, num_samples, cvg)
 
-    fit, test = begin
-      fit_callback() = begin
-        pos_perm_coefs[p] = max(pos_perm_coefs[p], maximum(svr[:coef_]))
-        neg_perm_coefs[p] = min(neg_perm_coefs[p], minimum(svr[:coef_]))
-      end
-      fit_and_test_gen(y_shuf, fit_callback)
-    end
+  pv(arr::Vector{Float64}, tail::Symbol=:both) = pvalue(OneSampleTTest(arr), tail=tail)
 
-    test_scores[p] = mean(cross_validate(fit, test, num_samples, cvg))
-
-  end
-
-  actual_coefs_mat::Matrix{Float64} = zeros(Float64, n_folds, length(edges))
-
-  fit, test = begin
-    state = Dict(:call_num=>0)
-    fit_callback() = begin
-      state[:call_num] = state[:call_num] + 1
-      actual_coefs_mat[state[:call_num], :] = svr[:coef_]
-    end
-    fit_and_test_gen(y, fit_callback)
-  end
-
-  actual_score=mean(cross_validate(fit, test, num_samples, cvg))
-
-  perm_info::DataFrame = begin
-    perm_scores = sort(test_scores, rev=true)
-    actual_score_rank=searchsortedfirst(perm_scores, actual_score, rev=true)
-
-    DataFrame(perm_score=perm_scores,
-              actual_score=actual_score,
-              actual_score_rank=actual_score_rank,
-              pos_perm_coef=sort(pos_perm_coefs, rev=true),
-              neg_perm_coef=sort(neg_perm_coefs))
-  end
+  pred_info::DataFrame = DataFrame(
+    mean=mean(test_scores),
+    std=std(test_scores),
+    right_tail_p=pv(test_scores, :right),
+    num_perms=n_perms)
 
   edge_info::DataFrame = begin
     ei = DataFrame()
     ei[:edge] = edges
     ei[:edge_name] = map(mk_edge_string, ei[:edge])
-    ei[:coef] = mean(actual_coefs_mat, 1)[:]::Vector{Float64}
 
-    ei[:pos_rank] = [searchsortedfirst(perm_info[:pos_perm_coef], c, rev=true)
-                     for c in ei[:coef]]
-    ei[:neg_rank] = [searchsortedfirst(perm_info[:neg_perm_coef], c)
-                     for c in ei[:coef]]
-    sort(ei, cols=:coef)
+
+    edge_apply(fn::Function) = [fn(dropna(coefs[e])) for e in edges]
+
+    ei[:mean] = edge_apply(mean)
+    ei[:std] = edge_apply(std)
+    ei[:two_tail_p] = edge_apply(pv)
+
+    sort(ei, cols=:two_tail_p)
   end
 
   Dict(:edge_info => edge_info,
-       :perm_info => perm_info)
+       :pred_info => pred_info)
 
 end
 
