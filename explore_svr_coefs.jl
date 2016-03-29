@@ -201,13 +201,29 @@ function calc_coefs(d::DataInfo,
 
   test_scores::Vector{Float64} = cross_validate(fit, test, num_samples, cvg)
 
+  ht_info(arr::Vector{Float64}) = begin
+    ret = Dict{Symbol, Float64}()
+    ht = OneSampleTTest(arr)
+    ret[:right_tail_p] = pvalue(ht, tail=:right)
+    ret[:left_tail_p] = pvalue(ht, tail=:left)
+    ret[:two_tail_p] = pvalue(ht, tail=:both)
+    ret[:t] = ht.t
+    ret
+  end
+
   pv(arr::Vector{Float64}, tail::Symbol=:both) = pvalue(OneSampleTTest(arr), tail=tail)
 
-  pred_info::DataFrame = DataFrame(
-    mean=mean(test_scores),
-    std=std(test_scores),
-    right_tail_p=pv(test_scores, :right),
-    num_perms=n_perms)
+  pred_info::DataFrame = begin
+    ht = ht_info(test_scores)
+    pi = DataFrame(
+      mean=mean(test_scores),
+      std=std(test_scores),
+      t=ht[:t],
+      right_tail_p=ht[:right_tail_p],
+      left_tail_p=ht[:left_tail_p],
+      two_tail_p=ht[:two_tail_p],
+      num_perms=n_perms)
+  end
 
   edge_info::DataFrame = begin
     ei = DataFrame()
@@ -219,7 +235,11 @@ function calc_coefs(d::DataInfo,
 
     ei[:mean] = edge_apply(mean)
     ei[:std] = edge_apply(std)
-    ei[:two_tail_p] = edge_apply(pv)
+
+    hts = edge_apply(ht_info)
+    for k in keys(hts[1])
+      ei[k] = [i[k] for i in hts]
+    end
 
     sort(ei, cols=:two_tail_p)
   end
