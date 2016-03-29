@@ -1,3 +1,4 @@
+using Colors
 using DataFrames
 using Lazy
 using MLBase
@@ -72,7 +73,7 @@ function learning_curve(svr::PyObject,
                         m::MeasureGroup,
                         region::Region,
                         subject_group::SubjectGroup,
-                        train_ratios::AbstractVector{Float64}=1./6:1./6:1.;
+                        train_ratios::AbstractVector{Float64};
                         score_fn::Function=r2_score)
 
   X, y = get_Xy_mat(m, diff_wpm, region=region, subject_group=subject_group)
@@ -133,14 +134,20 @@ function learning_curve(m::MeasureGroup;
                         region::Region=left_select,
                         C=1.0,
                         subject_group::SubjectGroup=all_subjects,
-                        seed::Nullable{Int}=Nullable(1234))
+                        seed::Nullable{Int}=Nullable(1234),
+                        train_ratios::AbstractVector{Float64}=1./6:1./6:1.)
   isnull(seed) || srand(get(seed))
-
-  di = DataInfo(m, diff_wpm, subject_group, region)
 
   svr = LinearSVR(C=C)
   lc_cvg_gen = cvg_gen_gen(RandomSub, 25)
-  learning_curve(svr, lc_cvg_gen, m, region, subject_group)
+  learning_curve(svr, lc_cvg_gen, m, region, subject_group, train_ratios)
+end
+
+
+function learning_curve(di::DataInfo, C::Float64; seed::Nullable{Int}=Nullable(1234),
+                        train_ratios::AbstractVector{Float64}=1./6:1./6:1.)
+  learning_curve(di.measure_group, region=di.region, C=C, subject_group=di.subject_group, seed=seed,
+                 train_ratios=train_ratios)
 end
 
 
@@ -235,22 +242,12 @@ function calc_coefs(d::DataInfo,
 end
 
 
-function calc_all_coefs()
-  cs = Dict(adw => Dict(left_select => 1e-2),
-            atw => Dict(left_select => 1e-2))
+function calc_all_coefs(cs::Dict{DataInfo, Float64})
 
-  s_groups = SubjectGroup[all_subjects, improved, poor_pd]
-
-  ret = Dict()
-  for g in s_groups
-    println(g)
-    ret[g] = Dict()
-    for m in keys(cs)
-      ret[g][m] = Dict()
-      for r in keys(cs[m])
-        ret[g][m][r] = calc_coefs(m, cs[m][r], diff_wpm, r, group=g)
-      end
-    end
+  ret = Dict{DataInfo, Dict{Symbol, DataFrame}}()
+  for (di::DataInfo, C::Float64) in cs
+    println(di)
+    ret[di] = calc_coefs(m, di, C)
   end
 
   ret
@@ -272,4 +269,96 @@ function save_calc_coefs(calc_all_coefs_ret::Dict)
       end
     end
   end
+end
+
+
+function lc_flip(di::DataInfo, C::Float64, flip_ratio::Float64)
+  ret = DataFrame()
+  for C_tmp = [C/flip_ratio, C, C*flip_ratio]
+
+    suff(k::Symbol) = if(C_tmp != C)
+      C_tmp > C ? symbol(k, "_gt") : symbol(k, "_lt") else
+      k end
+
+    lc = learning_curve(di, C_tmp, train_ratios=5./6:1./6:1.)[end, :]
+    ret[suff(:C)] = C_tmp
+
+    for n in names(lc)
+      ret[suff(n)] = lc[n]
+    end
+
+  end
+
+  for f in fieldnames(di)
+    ret[f] = di[f]
+  end
+
+  ret
+end
+
+
+###Hypothesis: only brain region determines optimal C for a measure
+function param_test()
+  best_Cs = Dict(
+    atw => Dict(
+      left => 5e-4,
+      left_select => 5e-3,
+      full_brain => 5e-4
+      ),
+    adw => Dict(
+      left => 5e-4,
+      left_select => 5e-3,
+      full_brain => 5e-4
+      )
+    )
+
+  specials = Dict(
+    DataInfo(adw, diff_wpm, improved, full_brain) => 1e-3
+    )
+
+  data_infos = for_all_combos(targets=[diff_wpm])
+
+  ret = DataFrame()
+
+  for di in data_infos
+    println()
+    println("#####")
+
+    C = in(di, keys(specials)) ? specials[di] : best_Cs[di.measure_group][di.region]
+
+    println("di: $di, C: $C")
+    lc::DataFrame = lc_flip(di, C, 5.)
+    ret = isempty(ret) ? lc : vcat(ret, lc)
+
+    println()
+  end
+
+  sort(ret, cols=fieldnames(DataInfo))
+end
+
+
+function plot_param_test(pt_res::DataFrame)
+  function mk_layer_di(col::Symbol, clr::AbstractString)
+    col_std::Symbol = replace("$col", "_mn", "_std")
+    ymax = pt_res[col] + pt_res[col_std]
+    ymin = pt_res[col] - pt_res[col_std]
+    di_strings = [to_string(DataInfo(m[2], diff_wpm, s[2], r[2]))[1:end-9]
+                  for (m, s, r) in eachrow(pt_res[[:measure_group, :subject_group, :region]])]
+
+    layer(x, x=di_strings, y=col, ymax=ymax, ymin=ymin,
+          Geom.line, Geom.point,
+          Theme(default_color=parse(Colorant, clr))
+          )
+  end
+
+  plot_test() = plot(mk_layer_di(:test_mn, "#00FF00"),
+                     mk_layer_di(:test_mn_lt, "#FF0000"),
+                     mk_layer_di(:test_mn_gt, "#0000FF"))
+
+  plot_train() = plot(mk_layer_di(:train_mn, "#00FF00"),
+                      mk_layer_di(:train_mn_lt, "#FF0000"),
+                      mk_layer_di(:train_mn_gt, "#0000FF"))
+
+  (plot_test, plot_train)
+
 end

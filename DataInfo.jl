@@ -1,6 +1,6 @@
 include("helpers.jl")
 
-type DataInfo
+immutable DataInfo
   measure_group::MeasureGroup
   target::Target
   subject_group::SubjectGroup
@@ -67,6 +67,19 @@ function for_all_combos(;fn::Function=(di::DataInfo) -> di,
     end
   end
 
-  ret
+  sort(ret)
 
 end
+
+
+Base.isless(x::DataInfo, y::DataInfo) = begin
+  for f in fieldnames(x)
+    if x.(f) != y.(f)
+      return x.(f) < y.(f)
+    end
+  end
+
+  false
+end
+
+Base.show(io::IO, di::DataInfo) = print(io, to_string(di))

@@ -2,13 +2,13 @@ using DataFrames
 using Lazy
 using Memoize
 
-@enum MeasureGroup atw adw
+@enum MeasureGroup adw atw
 
 @enum Target diff_wpm se
 
-@enum Region left_select left full_brain
+@enum Region full_brain left left_select
 
-@enum SubjectGroup poor_pd improved all_subjects poor_pd_1
+@enum SubjectGroup all_subjects improved poor_pd poor_pd_1
 
 @memoize function is_left_hemi_edge(edge_col::Symbol)
   a, b = edge_col_to_roi_names(edge_col)
@@ -118,7 +118,7 @@ end
   subject_filter_gen_gen(s)(m)(df)
 
 
-@memoize covars_for_target(t::Target, m::MeasureGroup) = begin
+covars_for_target(t::Target, m::MeasureGroup) = begin
   @switch t begin
     se; Symbol[symbol("pd_$(m)")]
     diff_wpm; Symbol[]
