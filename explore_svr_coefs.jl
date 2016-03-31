@@ -3,6 +3,7 @@ using DataFrames
 using HypothesisTests
 using Lazy
 using MLBase
+using PValueAdjust
 using PyCall
 
 include("DataInfo.jl")
@@ -201,12 +202,16 @@ function calc_coefs(d::DataInfo,
 
   test_scores::Vector{Float64} = cross_validate(fit, test, num_samples, cvg)
 
+  typealias HtInfo Dict{Symbol, Float64}
   ht_info(arr::Vector{Float64}) = begin
     ret = Dict{Symbol, Float64}()
     ht = OneSampleTTest(arr)
-    ret[:right_tail_p] = pvalue(ht, tail=:right)
-    ret[:left_tail_p] = pvalue(ht, tail=:left)
-    ret[:two_tail_p] = pvalue(ht, tail=:both)
+
+    for tail in [:right, :left, :both]
+      p_sym = symbol(tail, :_p)
+      ret[p_sym] = pvalue(ht, tail=tail)
+    end
+
     ret[:t] = ht.t
     ret
   end
@@ -219,9 +224,9 @@ function calc_coefs(d::DataInfo,
       mean=mean(test_scores),
       std=std(test_scores),
       t=ht[:t],
-      right_tail_p=ht[:right_tail_p],
-      left_tail_p=ht[:left_tail_p],
-      two_tail_p=ht[:two_tail_p],
+      right_p=ht[:right_p],
+      left_p=ht[:left_p],
+      both_p=ht[:both_p],
       num_perms=n_perms)
   end
 
@@ -236,12 +241,17 @@ function calc_coefs(d::DataInfo,
     ei[:mean] = edge_apply(mean)
     ei[:std] = edge_apply(std)
 
-    hts = edge_apply(ht_info)
-    for k in keys(hts[1])
-      ei[k] = [i[k] for i in hts]
+    hts::Vector{HtInfo} = edge_apply(ht_info)
+    for k::Symbol in keys(hts[1])
+      ei[k] = Float64[i[k] for i in hts]
+
+      is_p_measure::Bool = endswith(string(k), "_p")
+      if is_p_measure
+        ei[symbol(k, :_adj)]= padjust(ei[k], BenjaminiHochberg)
+      end
     end
 
-    sort(ei, cols=:two_tail_p)
+    sort(ei, cols=:t)
   end
 
   Dict(:edge_info => edge_info,
