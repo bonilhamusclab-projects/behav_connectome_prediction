@@ -10,6 +10,8 @@ using Memoize
 
 @enum SubjectGroup all_subjects improved poor_pd poor_pd_1
 
+@enum DataSet conn lesion
+
 @memoize function is_left_hemi_edge(edge_col::Symbol)
   a, b = edge_col_to_roi_names(edge_col)
   in(a, jhu_left_names()) & in(b, jhu_left_names())
@@ -52,8 +54,8 @@ end
 
 data_dir() = joinpath(dirname(pwd()), "data")
 
-@memoize full_adw() = readtable("$(data_dir())/step3/full_adw.csv")
-@memoize full_atw() = readtable("$(data_dir())/step3/full_atw.csv")
+@memoize full_adw(d::DataSet=conn) = readtable("$(data_dir())/step3/$d/full_adw.csv")
+@memoize full_atw(d::DataSet=conn) = readtable("$(data_dir())/step3/$d/full_atw.csv")
 
 @memoize jhu() = readtable("$(data_dir())/jhu_coords.csv")
 
