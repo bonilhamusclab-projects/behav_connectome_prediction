@@ -50,18 +50,19 @@ function get_edges(m::MeasureGroup, region::Region)
   get_edges(full, region=region)
 end
 
+data_dir() = joinpath(dirname(pwd()), "data")
 
-@memoize full_adw() = readtable("data/step3/full_adw.csv")
-@memoize full_atw() = readtable("data/step3/full_atw.csv")
+@memoize full_adw() = readtable("$(data_dir())/step3/full_adw.csv")
+@memoize full_atw() = readtable("$(data_dir())/step3/full_atw.csv")
 
-@memoize jhu() = readtable("data/jhu_coords.csv")
+@memoize jhu() = readtable("$(data_dir())/jhu_coords.csv")
 
 names_set(df_fn::Function) = @> df_fn()[:name] Set
 
-@memoize jhu_left() = readtable("data/jhu_rois_left.csv")
+@memoize jhu_left() = readtable("$(data_dir())/jhu_rois_left.csv")
 @memoize jhu_left_names() = @> jhu_left names_set
 
-@memoize jhu_left_select() = readtable("data/jhu_rois_left_adjusted.csv")
+@memoize jhu_left_select() = readtable("$(data_dir())/jhu_rois_left_adjusted.csv")
 @memoize jhu_left_select_names() = @> jhu_left_select names_set
 
 

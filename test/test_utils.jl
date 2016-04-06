@@ -1,4 +1,13 @@
-include("helpers.jl")
+macro data_include(f)
+  quote
+    f_name = $f
+    src_dir = joinpath(dirname(pwd()), "src")
+    include("$src_dir/$f_name")
+  end
+end
+
+@data_include("helpers.jl")
+
 
 edge_count(roi_count::Int64) = round(Int64, (roi_count^2 - roi_count)/2)
 

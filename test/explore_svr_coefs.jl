@@ -2,7 +2,9 @@ using Base.Test
 using MLBase
 using PyCall
 
-include("explore_svr_coefs.jl")
+include("test_utils.jl")
+
+@data_include("explore_svr_coefs.jl")
 
 
 py_r2_score = begin

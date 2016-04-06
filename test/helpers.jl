@@ -1,6 +1,7 @@
 using Base.Test
+include("test_utils.jl")
 
-include("helpers.jl")
+@data_include("helpers.jl")
 
 @test 5 == @eval_str "2 + 3"
 

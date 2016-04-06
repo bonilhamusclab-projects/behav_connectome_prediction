@@ -1,8 +1,9 @@
 using Base.Test
 
-include("DataInfo.jl")
-include("helpers.jl")
 include("test_utils.jl")
+
+@data_include("DataInfo.jl")
+@data_include("helpers.jl")
 
 
 function test_get_data(di::DataInfo,
