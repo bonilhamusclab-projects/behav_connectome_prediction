@@ -101,7 +101,7 @@ macro calc_all_measures()
   quote
     data_targets::Vector{DataInfo} =
       [DataInfo(m, t, s, r)
-       for m::MeasureGroup in (atw, adw),
+       for m::Outcome in (atw, adw),
        t::Target in (se, diff_wpm),
        r::Region in (full_brain, left, left_select)][:]
     calc_all_measures(data_targets)

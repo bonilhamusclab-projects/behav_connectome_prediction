@@ -1,19 +1,19 @@
 include("helpers.jl")
 
 immutable DataInfo
-  measure_group::MeasureGroup
+  outcome::Outcome
   target::Target
   subject_group::SubjectGroup
   region::Region
 end
 
-get_full(d::DataInfo) = @eval_str "full_$(d.measure_group)()"
+get_full(d::DataInfo) = @eval_str "full_$(d.outcome)()"
 
-get_covars(d::DataInfo) = covars_for_target(d.target, d.measure_group)
-get_edges(d::DataInfo) = get_edges(d.measure_group, d.region)
-get_target_col(d::DataInfo) = get_target_col(d.target, d.measure_group)
+get_covars(d::DataInfo) = covars_for_target(d.target, d.outcome)
+get_edges(d::DataInfo) = get_edges(d.outcome, d.region)
+get_target_col(d::DataInfo) = get_target_col(d.target, d.outcome)
 get_valid_rows(d::DataInfo) = subject_filter(
-  d.subject_group, d.measure_group, get_full(d))
+  d.subject_group, d.outcome, get_full(d))
 
 get_data(d::DataInfo) = begin
   target_col::Symbol = get_target_col(d)
@@ -40,7 +40,7 @@ get_Xy_mat(d::DataInfo) = begin
 end
 
 to_string(d::DataInfo) = join(
-  ["$(d.measure_group)_$(d.subject_group)_$(d.region)_$(d.target)"; get_covars(d)],
+  ["$(d.outcome)_$(d.subject_group)_$(d.region)_$(d.target)"; get_covars(d)],
   "_cv_")
 
 Base.start(d::DataInfo) = 1
@@ -49,14 +49,14 @@ Base.next(d::DataInfo, state) = d[fieldnames(DataTarget)[state]], state + 1
 Base.done(d::DataInfo, state) = state > length(fieldnames(DataTarget))
 
 function for_all_combos(;fn::Function=(di::DataInfo) -> di,
-                        measure_groups::Vector{MeasureGroup}=MeasureGroup[adw, atw],
+                        outcomes::Vector{Outcome}=Outcome[adw, atw],
                         subject_groups::Vector{SubjectGroup}=SubjectGroup[all_subjects, improved, poor_pd, poor_pd_1],
                         targets::Vector{Target}=[diff_wpm, se],
                         regions::Vector{Region}=[full_brain, left_select, left])
 
   ret = DataInfo[]
 
-  for m in measure_groups
+  for m in outcomes
     for t in targets
       for s in subject_groups
         for r in regions

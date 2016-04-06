@@ -19,7 +19,7 @@ function test_get_data(di::DataInfo,
   @test size(data) == (expected_num_rows, expected_num_edges + length(expected_covars) + 1)
 end
 
-test_get_data(measure::MeasureGroup,
+test_get_data(measure::Outcome,
         subject_group::SubjectGroup,
         s_count::Int64,
         region::Region,
@@ -38,7 +38,7 @@ test_fn = test_get_data
 @test_all_combos
 
 
-test_get_Xy_mat(measure::MeasureGroup,
+test_get_Xy_mat(measure::Outcome,
         subject_group::SubjectGroup,
         s_count::Int64,
         region::Region,
@@ -84,13 +84,13 @@ end
 was_called = create_was_called()
 
 filter_vals = Dict(SubjectGroup => [all_subjects],
-                   MeasureGroup => [adw],
+                   Outcome => [adw],
                    Target => [diff_wpm],
                    Region => [left_select])
 
 for_all_combos(fn=update_was_called,
                subject_groups=filter_vals[SubjectGroup],
-               measure_groups=filter_vals[MeasureGroup],
+               outcomes=filter_vals[Outcome],
                targets=filter_vals[Target],
                regions=filter_vals[Region]
                )

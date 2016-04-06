@@ -13,7 +13,7 @@ edge_count(roi_count::Int64) = round(Int64, (roi_count^2 - roi_count)/2)
 
 macro test_all_combos()
   quote
-    covars = Dict{Target, Dict{MeasureGroup, Vector{Symbol}}}(
+    covars = Dict{Target, Dict{Outcome, Vector{Symbol}}}(
       se => Dict( atw => [:pd_atw], adw => [:pd_adw]),
       diff_wpm => Dict( atw => [], adw => []))
     num_subjects = Dict(atw =>
@@ -29,10 +29,10 @@ macro test_all_combos()
                      left => edge_count(95),
                      left_select => edge_count(46))
 
-    for (measure::MeasureGroup, subjects::Dict) in num_subjects
+    for (measure::Outcome, subjects::Dict) in num_subjects
       for (subject::SubjectGroup, s_count::Int64) in subjects
         for (region::Region, e_count::Int64) in num_edges
-          for (target::Target, cs::Dict{MeasureGroup, Vector{Symbol}}) in covars
+          for (target::Target, cs::Dict{Outcome, Vector{Symbol}}) in covars
             test_fn(measure, subject, s_count, region, e_count, target, cs[measure])
           end
         end

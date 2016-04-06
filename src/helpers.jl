@@ -2,7 +2,7 @@ using DataFrames
 using Lazy
 using Memoize
 
-@enum MeasureGroup adw atw
+@enum Outcome adw atw
 
 @enum Target diff_wpm se
 
@@ -47,7 +47,7 @@ macro eval_str(s)
 end
 
 
-function get_edges(m::MeasureGroup, region::Region)
+function get_edges(m::Outcome, region::Region)
   full::DataFrame = @eval_str "full_$m()"
   get_edges(full, region=region)
 end
@@ -95,7 +95,7 @@ function create_edge_names(edges::Vector{Symbol})
 end
 
 
-@memoize function get_target_col(t::Target, m::MeasureGroup)
+@memoize function get_target_col(t::Target, m::Outcome)
   @switch t begin
     se; symbol("$(t)_$m")
     diff_wpm; symbol("$(m)_$t")
@@ -105,23 +105,23 @@ end
 
 @memoize function subject_filter_gen_gen(s::SubjectGroup)
   @switch s begin
-    all_subjects; m::MeasureGroup -> d::DataFrame -> repmat([true], size(d, 1))
-    improved; m::MeasureGroup -> d::DataFrame -> d[symbol(m, "_diff_wpm")] .> 0
-    poor_pd; m::MeasureGroup -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 0
-    poor_pd_1; m::MeasureGroup -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 1
+    all_subjects; m::Outcome -> d::DataFrame -> repmat([true], size(d, 1))
+    improved; m::Outcome -> d::DataFrame -> d[symbol(m, "_diff_wpm")] .> 0
+    poor_pd; m::Outcome -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 0
+    poor_pd_1; m::Outcome -> d::DataFrame -> d[symbol("pd_", m, "_z")] .< 1
   end
 end
 
 
-@memoize subject_filter_gen(s::SubjectGroup, m::MeasureGroup) =
+@memoize subject_filter_gen(s::SubjectGroup, m::Outcome) =
   subject_filter_gen_gen(s)(m)
 
 
-@memoize subject_filter(s::SubjectGroup, m::MeasureGroup, df::DataFrame) =
+@memoize subject_filter(s::SubjectGroup, m::Outcome, df::DataFrame) =
   subject_filter_gen_gen(s)(m)(df)
 
 
-covars_for_target(t::Target, m::MeasureGroup) = begin
+covars_for_target(t::Target, m::Outcome) = begin
   @switch t begin
     se; Symbol[symbol("pd_$(m)")]
     diff_wpm; Symbol[]

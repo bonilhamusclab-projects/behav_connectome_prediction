@@ -26,14 +26,14 @@ function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
 end
 
 
-function get_Xy_mat(m::MeasureGroup, target::Target;
+function get_Xy_mat(m::Outcome, target::Target;
                 region::Region=full_brain,
                 subject_group::SubjectGroup=all_subjects)
   get_Xy_mat(DataInfo(m, target, subject_group, region))
 end
 
 
-function pred_diff(m::MeasureGroup)
+function pred_diff(m::Outcome)
   svr = LinearSVR()
 
   X, y = get_Xy_mat(m, diff_wpm)
@@ -72,7 +72,7 @@ end
 
 function learning_curve(svr::PyObject,
                         lc_cvg_gen::Function,
-                        m::MeasureGroup,
+                        m::Outcome,
                         region::Region,
                         subject_group::SubjectGroup,
                         train_ratios::AbstractVector{Float64};
@@ -132,7 +132,7 @@ end
 cvg_gen(cvgT::Type, n_folds::Int64, n_samples::Int64) = cvg_gen_gen(cvgT, n_folds)(n_samples)
 
 
-function learning_curve(m::MeasureGroup;
+function learning_curve(m::Outcome;
                         region::Region=left_select,
                         C=1.0,
                         subject_group::SubjectGroup=all_subjects,
@@ -148,7 +148,7 @@ end
 
 function learning_curve(di::DataInfo, C::Float64; seed::Nullable{Int}=Nullable(1234),
                         train_ratios::AbstractVector{Float64}=1./6:1./6:1.)
-  learning_curve(di.measure_group, region=di.region, C=C, subject_group=di.subject_group, seed=seed,
+  learning_curve(di.outcome, region=di.region, C=C, subject_group=di.subject_group, seed=seed,
                  train_ratios=train_ratios)
 end
 
@@ -338,7 +338,7 @@ function param_test()
     println()
     println("#####")
 
-    C = in(di, keys(specials)) ? specials[di] : best_Cs[di.measure_group][di.region]
+    C = in(di, keys(specials)) ? specials[di] : best_Cs[di.outcome][di.region]
 
     println("di: $di, C: $C")
     lc::DataFrame = lc_flip(di, C, 5.)
@@ -357,7 +357,7 @@ function plot_param_test(pt_res::DataFrame)
     ymax = pt_res[col] + pt_res[col_std]
     ymin = pt_res[col] - pt_res[col_std]
     di_strings = [to_string(DataInfo(m[2], diff_wpm, s[2], r[2]))[1:end-9]
-                  for (m, s, r) in eachrow(pt_res[[:measure_group, :subject_group, :region]])]
+                  for (m, s, r) in eachrow(pt_res[[:outcome, :subject_group, :region]])]
 
     layer(x, x=di_strings, y=col, ymax=ymax, ymin=ymin,
           Geom.line, Geom.point,
