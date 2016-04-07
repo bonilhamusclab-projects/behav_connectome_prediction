@@ -280,7 +280,7 @@ end
 function calc_lesion_coefs()
   mk_di(o::Outcome, r::Region) = DataInfo(o, diff_wpm, all_subjects, r, lesion)
   regions::Vector{Region} = Region[left_select, left, full_brain]
-  cs::Dict{DataInfo, Float64} = [mk_di(adw, r) => 10. for r in regions,
+  cs::Dict{DataInfo, Float64} = [mk_di(o, r) => 10. for r in regions,
                                  o in Outcome[adw, atw]]
   calc_all_coefs(cs)
 end
