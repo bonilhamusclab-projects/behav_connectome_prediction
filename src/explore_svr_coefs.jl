@@ -258,8 +258,8 @@ function calc_coefs(d::DataInfo,
     sort(pr, cols=:t)
   end
 
-  Dict(symbol(d.dataset, :_info) => predictor_info,
-       :prediction_info => prediction_info)
+  Dict(symbol(d, :_predictors) => predictor_info,
+       symbol(d, :_predictions) => prediction_info)
 
 end
 
@@ -291,7 +291,7 @@ function save_calc_coefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, DataFra
     dir = joinpath("$(data_dir())/step4/svr/")
     isdir(dir) || mkpath(dir)
     for (k::Symbol, data::DataFrame) in calc_all_coefs_ret[di]
-      f_name = "$(di)_$(k)s.csv"
+      f_name = "$k.csv"
       println(f_name)
       writetable(joinpath(dir, f_name), data)
     end
