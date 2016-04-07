@@ -26,7 +26,7 @@ test_get_data(measure::Outcome,
         e_count::Int64,
         target::Target,
         covars::Vector{Symbol}) = begin
-  di = DataInfo(measure, target, subject_group, region)
+  di = DataInfo(measure, target, subject_group, region, conn)
   println(to_string(di))
 
   target_col = symbol(target, "_", measure)
@@ -45,7 +45,7 @@ test_get_Xy_mat(measure::Outcome,
         e_count::Int64,
         target::Target,
         covars::Vector{Symbol}) = begin
-  di = DataInfo(measure, target, subject_group, region)
+  di = DataInfo(measure, target, subject_group, region, conn)
   X, y = get_Xy_mat(di)
 
   @test size(X) == (s_count, e_count)
@@ -64,7 +64,8 @@ create_was_called() = Dict([ i => false for i in
                    [adw, atw,
                     diff_wpm, se,
                     all_subjects, improved, poor_pd, poor_pd_1,
-                    full_brain, left_select, left] ])
+                    full_brain, left_select, left,
+                    conn, lesion] ])
 
 was_called = create_was_called()
 
@@ -86,13 +87,15 @@ was_called = create_was_called()
 filter_vals = Dict(SubjectGroup => [all_subjects],
                    Outcome => [adw],
                    Target => [diff_wpm],
-                   Region => [left_select])
+                   Region => [left_select],
+                   DataSet => [conn])
 
 for_all_combos(fn=update_was_called,
                subject_groups=filter_vals[SubjectGroup],
                outcomes=filter_vals[Outcome],
                targets=filter_vals[Target],
-               regions=filter_vals[Region]
+               regions=filter_vals[Region],
+               datasets=filter_vals[DataSet]
                )
 
 for k in keys(was_called)
