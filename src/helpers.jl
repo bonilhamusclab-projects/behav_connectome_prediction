@@ -12,31 +12,44 @@ using Memoize
 
 @enum DataSet conn lesion
 
-@memoize function is_left_hemi_edge(edge_col::Symbol)
+@memoize function is_left_edge(edge_col::Symbol)
   a, b = edge_col_to_roi_names(edge_col)
   in(a, jhu_left_names()) & in(b, jhu_left_names())
 end
 
 
-@memoize function is_left_hemi_select_edge(edge_col::Symbol)
+@memoize function is_left_select_edge(edge_col::Symbol)
   a, b = edge_col_to_roi_names(edge_col)
   in(a, jhu_left_select_names()) & in(b, jhu_left_select_names())
 end
 
 
-@memoize function region_filter(region::Region, edges::Vector{Symbol})
-  @switch region begin
-    left_select; filter(is_left_hemi_select_edge, edges)
-    left; filter(is_left_hemi_edge, edges)
-    full_brain; filter(e::Symbol -> true, edges)
-  end
+@memoize function roi_col_to_jhu_name(roi_col::Symbol)
+  roi_reg = r"x([0-9]+)"
+  m = match(roi_reg, string(roi_col))
+  ix = parse(Int64, m[1]) + 1
+  jhu()[ix, :name]
 end
 
 
-function get_edges(df::DataFrame; region::Region=full_brain)
-  edge_filter(n::Symbol) = startswith(string(n), "x")
+@memoize is_left_roi(roi_col::Symbol) = in(
+  roi_col_to_jhu_name(roi_col), jhu_left_names())
 
-  region_filter(region, filter(edge_filter, names(df)))
+
+@memoize is_left_select_roi(roi_col::Symbol) = in(
+  roi_col_to_jhu_name(roi_col), jhu_left_select_names())
+
+
+@memoize function region_filter(r::Region, d::DataSet, predictors::Vector{Symbol})
+
+  filter_fn::Function = if(r == full_brain)
+    p::Symbol -> true
+  else
+    fn_string = "is_$(r)_$(d == conn ? "edge" : "roi")"
+    eval(parse(fn_string))
+  end
+
+  filter(filter_fn, predictors)
 end
 
 
@@ -47,15 +60,20 @@ macro eval_str(s)
 end
 
 
-function get_edges(m::Outcome, region::Region)
-  full::DataFrame = @eval_str "full_$m()"
-  get_edges(full, region=region)
+function get_predictors(m::Outcome, r::Region, d::DataSet)
+  full::DataFrame = @eval_str "full_$m($d)"
+
+  predictor_cols::Vector{Symbol} = filter(
+    n -> startswith(string(n), "x"),
+    names(full))
+
+  region_filter(r, d, predictor_cols)
 end
 
 data_dir() = joinpath(dirname(pwd()), "data")
 
-@memoize full_adw(d::DataSet=conn) = readtable("$(data_dir())/step3/$d/full_adw.csv")
-@memoize full_atw(d::DataSet=conn) = readtable("$(data_dir())/step3/$d/full_atw.csv")
+@memoize full_adw(d::DataSet) = readtable("$(data_dir())/step3/$d/full_adw.csv")
+@memoize full_atw(d::DataSet) = readtable("$(data_dir())/step3/$d/full_atw.csv")
 
 @memoize jhu() = readtable("$(data_dir())/jhu_coords.csv")
 
@@ -90,8 +108,17 @@ end
 end
 
 
-function create_edge_names(edges::Vector{Symbol})
-  map(mk_edge_string, edges)
+@memoize function mk_predictor_string_gen(d::DataSet)
+  @switch d begin
+    conn; mk_edge_string;
+    lesion; roi_col_to_jhu_name;
+  end
+end
+
+
+function create_predictor_names(predictors::Vector{Symbol}, d::DataSet)
+  mk_pred_string::Function = mk_predictor_string_gen(d)
+  map(mk_pred_string, predictors)
 end
 
 
@@ -117,8 +144,10 @@ end
   subject_filter_gen_gen(s)(m)
 
 
-@memoize subject_filter(s::SubjectGroup, m::Outcome, df::DataFrame) =
+@memoize subject_filter(s::SubjectGroup, m::Outcome, df::DataFrame) = begin
+  println("in subj filter")
   subject_filter_gen_gen(s)(m)(df)
+end
 
 
 covars_for_target(t::Target, m::Outcome) = begin

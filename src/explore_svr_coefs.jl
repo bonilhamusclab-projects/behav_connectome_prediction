@@ -26,17 +26,19 @@ function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
 end
 
 
-function get_Xy_mat(m::Outcome, target::Target;
-                region::Region=full_brain,
-                subject_group::SubjectGroup=all_subjects)
-  get_Xy_mat(DataInfo(m, target, subject_group, region))
+function get_Xy_mat(o::Outcome,
+                    target::Target;
+                    dataset::DataSet=conn,
+                    region::Region=full_brain,
+                    subject_group::SubjectGroup=all_subjects)
+  get_Xy_mat(DataInfo(o, target, subject_group, region, dataset))
 end
 
 
-function pred_diff(m::Outcome)
+function pred_diff(m::Outcome;dataset::DataSet=conn)
   svr = LinearSVR()
 
-  X, y = get_Xy_mat(m, diff_wpm)
+  X, y = get_Xy_mat(m, diff_wpm, dataset=dataset)
 
   fit(inds::Vector{Int64}) = svr[:fit](X[inds, :], y[inds])
 
@@ -72,13 +74,14 @@ end
 
 function learning_curve(svr::PyObject,
                         lc_cvg_gen::Function,
-                        m::Outcome,
+                        o::Outcome,
+                        dataset::DataSet,
                         region::Region,
                         subject_group::SubjectGroup,
                         train_ratios::AbstractVector{Float64};
                         score_fn::Function=r2_score)
 
-  X, y = get_Xy_mat(m, diff_wpm, region=region, subject_group=subject_group)
+  X, y = get_Xy_mat(o, diff_wpm, dataset=dataset, region=region, subject_group=subject_group)
   num_samples::Int64 = length(y)
 
   train_sizes::Vector{Int64} = ratios_to_counts(train_ratios, num_samples)
@@ -132,7 +135,8 @@ end
 cvg_gen(cvgT::Type, n_folds::Int64, n_samples::Int64) = cvg_gen_gen(cvgT, n_folds)(n_samples)
 
 
-function learning_curve(m::Outcome;
+function learning_curve(o::Outcome;
+                        dataset::DataSet=conn,
                         region::Region=left_select,
                         C=1.0,
                         subject_group::SubjectGroup=all_subjects,
@@ -142,7 +146,7 @@ function learning_curve(m::Outcome;
 
   svr = LinearSVR(C=C)
   lc_cvg_gen = cvg_gen_gen(RandomSub, 25)
-  learning_curve(svr, lc_cvg_gen, m, region, subject_group, train_ratios)
+  learning_curve(svr, lc_cvg_gen, o, dataset, region, subject_group, train_ratios)
 end
 
 
@@ -167,15 +171,15 @@ function calc_coefs(d::DataInfo,
   svr = LinearSVR(C=C)
   cvg::CrossValGenerator = cvg_gen(RandomSub, n_perms, num_samples)
 
-  edges = get_edges(d)
-  n_edges = length(edges)
+  predictors = get_predictors(d)
+  n_predictors = length(predictors)
 
   coefs::DataFrame = begin
     ret = DataFrame()
-    for e in edges
+    for p in predictors
       ###Hack to keep it float64 while being NA
-      ret[e] = repmat([-Inf], n_perms)
-      ret[ret[e] .== -Inf, :] = NA
+      ret[p] = repmat([-Inf], n_perms)
+      ret[ret[p] .== -Inf, :] = NA
     end
     ret
   end
@@ -189,7 +193,7 @@ function calc_coefs(d::DataInfo,
       println(state[:fit_call])
       svr[:fit](X[inds, :], y[inds])
       for (ix, c) in enumerate(svr[:coef_])
-        coefs[state[:fit_call], edges[ix]] = c
+        coefs[state[:fit_call], predictors[ix]] = c
       end
       svr
     end
@@ -218,7 +222,7 @@ function calc_coefs(d::DataInfo,
 
   pv(arr::Vector{Float64}, tail::Symbol=:both) = pvalue(OneSampleTTest(arr), tail=tail)
 
-  pred_info::DataFrame = begin
+  prediction_info::DataFrame = begin
     ht = ht_info(test_scores)
     pi = DataFrame(
       mean=mean(test_scores),
@@ -230,32 +234,32 @@ function calc_coefs(d::DataInfo,
       num_perms=n_perms)
   end
 
-  edge_info::DataFrame = begin
-    ei = DataFrame()
-    ei[:edge] = edges
-    ei[:edge_name] = map(mk_edge_string, ei[:edge])
+  predictor_info::DataFrame = begin
+    pr = DataFrame()
+    pr[symbol(d.dataset)] = predictors
+    pr[symbol(d.dataset, :_name)] = create_predictor_names(predictors, d.dataset)
 
 
-    edge_apply(fn::Function) = [fn(dropna(coefs[e])) for e in edges]
+    pred_apply(fn::Function) = [fn(dropna(coefs[p])) for p in predictors]
 
-    ei[:mean] = edge_apply(mean)
-    ei[:std] = edge_apply(std)
+    pr[:mean] = pred_apply(mean)
+    pr[:std] = pred_apply(std)
 
-    hts::Vector{HtInfo} = edge_apply(ht_info)
+    hts::Vector{HtInfo} = pred_apply(ht_info)
     for k::Symbol in keys(hts[1])
-      ei[k] = Float64[i[k] for i in hts]
+      pr[k] = Float64[i[k] for i in hts]
 
       is_p_measure::Bool = endswith(string(k), "_p")
       if is_p_measure
-        ei[symbol(k, :_adj)]= padjust(ei[k], BenjaminiHochberg)
+        pr[symbol(k, :_adj)]= padjust(pr[k], BenjaminiHochberg)
       end
     end
 
-    sort(ei, cols=:t)
+    sort(pr, cols=:t)
   end
 
-  Dict(:edge_info => edge_info,
-       :pred_info => pred_info)
+  Dict(symbol(d.dataset, :_info) => predictor_info,
+       :prediction_info => prediction_info)
 
 end
 
@@ -273,11 +277,20 @@ function calc_all_coefs(cs::Dict{DataInfo, Float64})
 end
 
 
+function calc_lesion_coefs()
+  mk_di(o::Outcome, r::Region) = DataInfo(o, diff_wpm, all_subjects, r, lesion)
+  regions::Vector{Region} = Region[left_select, left, full_brain]
+  cs::Dict{DataInfo, Float64} = [mk_di(adw, r) => 10. for r in regions,
+                                 o in Outcome[adw, atw]]
+  calc_all_coefs(cs)
+end
+
+
 function save_calc_coefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, DataFrame}})
   for di::DataInfo in keys(calc_all_coefs_ret)
-    dir = joinpath("data/step4/svr/")
+    dir = joinpath("$(data_dir())/step4/svr/")
     isdir(dir) || mkpath(dir)
-    for (k::Symbol, data::DataFrame) in ret[di]
+    for (k::Symbol, data::DataFrame) in calc_all_coefs_ret[di]
       f_name = "$(di)_$(k)s.csv"
       println(f_name)
       writetable(joinpath(dir, f_name), data)
