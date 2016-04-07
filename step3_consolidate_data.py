@@ -40,15 +40,19 @@ def _prep_conn_df(df):
     return ret
 
 
-def load_conn_csv(csv_path):
-    df = _prep_conn_df(pd.read_csv(csv_path, header=None))
+def load_csv(csv_path, prep_fn=lambda df: df):
+    df = prep_fn(pd.read_csv(csv_path, header=None))
     df = df.T
     df.index = [os.path.basename(csv_path)[:-4]]
     return df
 
 
+def load_conn_csv(csv_path):
+    return load_csv(csv_path, _prep_conn_df)
+
+
 def load_lesion_csv(csv_path):
-    return pd.read_csv(csv_path, header=None).T
+    return load_csv(csv_path)
 
 
 def consolidate_x(csv_dir, dest_path, load_fn):
