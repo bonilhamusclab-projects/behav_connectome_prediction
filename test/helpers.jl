@@ -32,28 +32,28 @@ jhu_names = names_set(jhu)
 @test mk_edge_string(:x0_1) == "SFG_L -- SFG_R"
 
 
-atw_num_subjects = size(full_atw(conn), 1)
-adw_num_subjects = size(full_adw(conn), 1)
+atw_num_subjects = size(get_full(conn, atw), 1)
+adw_num_subjects = size(get_full(conn, adw), 1)
 
 all_filter_gen = subject_filter_gen_gen(all_subjects)
 all_atw_filter, all_adw_filter = map(all_filter_gen, [atw, adw])
 
-@test sum(all_atw_filter(full_atw(conn))) == atw_num_subjects
-@test sum(all_adw_filter(full_adw(conn))) == adw_num_subjects
+@test sum(all_atw_filter(get_full(conn, atw))) == atw_num_subjects
+@test sum(all_adw_filter(get_full(conn, adw))) == adw_num_subjects
 
 
 improved_filter_gen = subject_filter_gen_gen(improved)
 improved_atw_filter, improved_adw_filter = map(improved_filter_gen, [atw, adw])
 
-@test improved_atw_filter(full_atw(conn)) == (full_atw(conn)[:atw_diff_wpm] .> 0)
-@test improved_adw_filter(full_adw(conn)) == (full_adw(conn)[:adw_diff_wpm] .> 0)
+@test improved_atw_filter(get_full(conn, atw)) == (get_full(conn, atw)[:atw_diff_wpm] .> 0)
+@test improved_adw_filter(get_full(conn, adw)) == (get_full(conn, adw)[:adw_diff_wpm] .> 0)
 
 
 poor_pd_filter_gen = subject_filter_gen_gen(poor_pd)
 poor_pd_atw_filter, poor_pd_adw_filter = map(poor_pd_filter_gen, [atw, adw])
 
-@test poor_pd_atw_filter(full_atw(conn)) == (full_atw(conn)[:pd_atw_z] .< 0)
-@test poor_pd_adw_filter(full_adw(conn)) == (full_adw(conn)[:pd_adw_z] .< 0)
+@test poor_pd_atw_filter(get_full(conn, atw)) == (get_full(conn, atw)[:pd_atw_z] .< 0)
+@test poor_pd_adw_filter(get_full(conn, adw)) == (get_full(conn, adw)[:pd_adw_z] .< 0)
 
 
 @test get_target_col(diff_wpm, atw) == :atw_diff_wpm

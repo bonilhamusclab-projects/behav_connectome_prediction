@@ -17,13 +17,13 @@ macro test_all_combos()
       se => Dict( atw => [:pd_atw], adw => [:pd_adw]),
       diff_wpm => Dict( atw => [], adw => []))
     num_subjects = Dict(atw =>
-                        Dict(all_subjects => size(full_atw(conn), 1),
-                             improved => sum(full_atw(conn)[:atw_diff_wpm] .> 0),
-                             poor_pd => sum(full_atw(conn)[:pd_atw_z] .< 0)),
+                        Dict(all_subjects => size(get_full(conn, atw), 1),
+                             improved => sum(get_full(conn, atw)[:atw_diff_wpm] .> 0),
+                             poor_pd => sum(get_full(conn, atw)[:pd_atw_z] .< 0)),
                         adw =>
-                        Dict(all_subjects => size(full_adw(conn), 1),
-                             improved => sum(full_adw(conn)[:adw_diff_wpm] .> 0),
-                             poor_pd => sum(full_adw(conn)[:pd_adw_z] .< 0))
+                        Dict(all_subjects => size(get_full(conn, adw), 1),
+                             improved => sum(get_full(conn, adw)[:adw_diff_wpm] .> 0),
+                             poor_pd => sum(get_full(conn, adw)[:pd_adw_z] .< 0))
                         )
     num_edges = Dict(full_brain => edge_count(189),
                      left => edge_count(95),

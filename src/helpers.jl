@@ -60,8 +60,8 @@ macro eval_str(s)
 end
 
 
-function get_predictors(m::Outcome, r::Region, d::DataSet)
-  full::DataFrame = @eval_str "full_$m($d)"
+function get_predictors(o::Outcome, r::Region, d::DataSet)
+  full::DataFrame = get_full(d, o)
 
   predictor_cols::Vector{Symbol} = filter(
     n -> startswith(string(n), "x"),
@@ -72,8 +72,7 @@ end
 
 data_dir() = joinpath(dirname(pwd()), "data")
 
-@memoize full_adw(d::DataSet) = readtable("$(data_dir())/step3/$d/full_adw.csv")
-@memoize full_atw(d::DataSet) = readtable("$(data_dir())/step3/$d/full_atw.csv")
+@memoize get_full(d::DataSet, o::Outcome) = readtable("$(data_dir())/step3/$d/full_$o.csv")
 
 @memoize jhu() = readtable("$(data_dir())/jhu_coords.csv")
 

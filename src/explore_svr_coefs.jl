@@ -389,3 +389,8 @@ function plot_param_test(pt_res::DataFrame)
   (plot_test, plot_train)
 
 end
+
+
+function ensemble(r::Region)
+
+end

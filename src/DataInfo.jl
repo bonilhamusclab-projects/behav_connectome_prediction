@@ -8,7 +8,7 @@ immutable DataInfo
   dataset::DataSet
 end
 
-get_full(d::DataInfo) = @eval_str "full_$(d.outcome)($(d.dataset))"
+get_full(d::DataInfo) = get_full(d.dataset, d.outcome)
 
 get_covars(d::DataInfo) = covars_for_target(d.target, d.outcome)
 get_predictors(d::DataInfo) = get_predictors(d.outcome, d.region, d.dataset)
