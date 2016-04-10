@@ -391,6 +391,64 @@ function plot_param_test(pt_res::DataFrame)
 end
 
 
-function ensemble(r::Region)
+function ensemble(outcome::Outcome, region::Region=left_select,
+                  conn_C::Float64=5e-3, lesion_C::Float64=50.)
 
+  svrs::Dict{DataSet, PyObject} = Dict(conn => LinearSVR(C=conn_C),
+                                       lesion => LinearSVR(C=lesion_C))
+
+  both_ds(f::Function, T::Type) = Dict{DataSet, T}(
+    [d => f(d)::T for d in [conn, lesion]])
+
+  dis::Dict{DataSet, DataInfo} = both_ds(DataInfo) do d
+    DataInfo(outcome, diff_wpm, all_subjects, region, d)
+  end
+
+  ids(di::DataInfo) = get_full(di)[:id]
+  common_ids::Vector{UTF8String} = intersect(ids(dis[conn]), ids(dis[lesion]))
+  common_id_ixs(di::DataInfo) = map(common_ids) do id
+    ret::Vector{Int64} = find(ids(di) .== id)
+    @assert length(ret) == 1
+    ret[1]
+  end
+
+  typealias XY Tuple{Matrix{Float64}, Vector{Float64}}
+  XYs::Dict{DataSet, XY} = both_ds(XY) do d
+    di::DataInfo = dis[d]
+    ixs::Vector{Int64} = common_id_ixs(di)
+    (X::Matrix{Float64}, y::Vector{Float64}) = get_Xy_mat(di)
+    X[ixs, :], y[ixs]
+  end
+
+  @assert XYs[conn][2] == XYs[lesion][2]
+
+  fit(inds::Vector{Int64}) = both_ds(PyObject) do d
+    svr::PyObject = svrs[d]
+    (X::Matrix{Float64}, y::Vector{Float64}) = XYs[d]
+    svr[:fit](X[inds, :], y[inds])
+  end
+
+  test(svrs::Dict{DataSet, PyObject}, inds::Vector{Int64}) = begin
+    predictions::Matrix{Float64} = begin
+      ret = zeros(Float64, length(inds), 2)
+      for (ix::Int64, (d::DataSet, svr::PyObject)) in enumerate(svrs)
+        X::Matrix{Float64} = XYs[d][1]
+        ret[:, ix] = svr[:predict](X[inds, :])
+      end
+      ret
+    end
+
+    ensemble_predictions::Vector{Float64} = mean(predictions, 2)[:]
+    @assert length(ensemble_predictions) == length(inds)
+
+    y::Vector{Float64} = XYs[lesion][2]
+    r2_score(y[inds], ensemble_predictions)
+  end
+
+  num_samples::Int64 = length(common_ids)
+
+  cross_validate(fit,
+                 test,
+                 num_samples,
+                 Kfold(num_samples, 5))
 end

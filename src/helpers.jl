@@ -144,7 +144,6 @@ end
 
 
 @memoize subject_filter(s::SubjectGroup, m::Outcome, df::DataFrame) = begin
-  println("in subj filter")
   subject_filter_gen_gen(s)(m)(df)
 end
 
