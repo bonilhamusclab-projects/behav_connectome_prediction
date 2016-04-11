@@ -87,15 +87,22 @@ def consolidate_x_with_y(y_dir="data/step2/",
                 x_src="data/step3/X.csv",
                 dest_dir="data/step3/"):
     x = pd.read_csv(x_src, index_col=0)
+    x['id'] = x.index
 
     ret = dict()
+    meta = pd.read_csv(os.path.join(y_dir, 'meta.csv'))
+
+    def inner_merge(x, y):
+        return pd.merge(x, y, on='id', how='inner')
+
     for yo in ['adw', 'atw']:
         y_src = os.path.join(y_dir, yo+'_outcomes.csv')
         y = pd.read_csv(y_src)
-        full = pd.merge(x, y, right_on='id', left_index=True, how='inner')
+        full = inner_merge(x, y)
+        full = inner_merge(full, meta)
 
         max_num_rows = np.min((x.shape[0], y.shape[0]))
-        num_cols = x.shape[1] + y.shape[1]
+        num_cols = x.shape[1] + y.shape[1] + meta.shape[1] - 2
 
         assert full.shape[0] <= max_num_rows
         assert full.shape[1] == num_cols
@@ -120,11 +127,11 @@ def consolidate_conn_x_with_y(x_src="data/step3/conn/X.csv",
 
 
 def run_all():
-    consolidate_conn_x()
-    consolidate_conn_x_with_y()
-
     consolidate_lesion_x()
     consolidate_lesion_x_with_y()
+
+    consolidate_conn_x()
+    consolidate_conn_x_with_y()
 
 
 def _test():
