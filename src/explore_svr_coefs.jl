@@ -124,7 +124,7 @@ function learning_curve(svr::PyObject,
 end
 
 
-function cvg_gen_gen(cvgT::Type, n_folds::Int64)
+function get_cvg_gen(cvgT::Type, n_folds::Int64)
   @assert cvgT <: CrossValGenerator
   @switch cvgT begin
     Kfold; (n_samples::Int64) -> Kfold(n_samples, n_folds)
@@ -132,7 +132,7 @@ function cvg_gen_gen(cvgT::Type, n_folds::Int64)
   end
 end
 
-cvg_gen(cvgT::Type, n_folds::Int64, n_samples::Int64) = cvg_gen_gen(cvgT, n_folds)(n_samples)
+get_cvg(cvgT::Type, n_folds::Int64, n_samples::Int64) = get_cvg_gen(cvgT, n_folds)(n_samples)
 
 
 function learning_curve(o::Outcome;
@@ -145,7 +145,7 @@ function learning_curve(o::Outcome;
   isnull(seed) || srand(get(seed))
 
   svr = LinearSVR(C=C)
-  lc_cvg_gen = cvg_gen_gen(RandomSub, 25)
+  lc_cvg_gen = get_cvg_gen(RandomSub, 25)
   learning_curve(svr, lc_cvg_gen, o, dataset, region, subject_group, train_ratios)
 end
 
@@ -169,7 +169,7 @@ function calc_coefs(d::DataInfo,
   num_samples::Int64 = length(y)
 
   svr = LinearSVR(C=C)
-  cvg::CrossValGenerator = cvg_gen(RandomSub, n_perms, num_samples)
+  cvg::CrossValGenerator = get_cvg(RandomSub, n_perms, num_samples)
 
   predictors = get_predictors(d)
   n_predictors = length(predictors)
@@ -392,7 +392,12 @@ end
 
 
 function ensemble(outcome::Outcome, region::Region=left_select,
-                  conn_C::Float64=5e-3, lesion_C::Float64=50.)
+                  conn_C::Float64=5e-3, lesion_C::Float64=50.;
+                  weights::Dict{DataSet, Float64} = Dict(conn => .2, lesion => .8),
+                  n_perms::Int64=1000,
+                  seed::Nullable{Int}=Nullable(1234))
+
+  isnull(seed) || srand(get(seed))
 
   svrs::Dict{DataSet, PyObject} = Dict(conn => LinearSVR(C=conn_C),
                                        lesion => LinearSVR(C=lesion_C))
@@ -433,12 +438,12 @@ function ensemble(outcome::Outcome, region::Region=left_select,
       ret = zeros(Float64, length(inds), 2)
       for (ix::Int64, (d::DataSet, svr::PyObject)) in enumerate(svrs)
         X::Matrix{Float64} = XYs[d][1]
-        ret[:, ix] = svr[:predict](X[inds, :])
+        ret[:, ix] = svr[:predict](X[inds, :]) .* weights[d]
       end
       ret
     end
 
-    ensemble_predictions::Vector{Float64} = mean(predictions, 2)[:]
+    ensemble_predictions::Vector{Float64} = sum(predictions, 2)[:]
     @assert length(ensemble_predictions) == length(inds)
 
     y::Vector{Float64} = XYs[lesion][2]
@@ -447,8 +452,6 @@ function ensemble(outcome::Outcome, region::Region=left_select,
 
   num_samples::Int64 = length(common_ids)
 
-  cross_validate(fit,
-                 test,
-                 num_samples,
-                 Kfold(num_samples, 5))
+  cvg::CrossValGenerator = get_cvg(RandomSub, n_perms, num_samples)
+  cross_validate(fit, test, num_samples, cvg)
 end
