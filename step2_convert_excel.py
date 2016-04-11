@@ -89,10 +89,13 @@ def convert_excel_meta(src_file, dest_dir='data/step2'):
         'img ': 'id',
         'Gender': 'gender',
         'DOB': 'dob',
-        'DateOfTest': 'dot'
+        'DateOfTest': 'dot',
+        'Aphasia Type': 'aphasia_type'
     }
 
     data = read_excel_data(src_file, column_mappings).dropna()
+
+    data['aphasia_type'] = [_sanitize_aphasia(i) for i in data['aphasia_type']]
 
     ##Neded b/c age at test is important, not current day
     dot = [_date_of_test_parser(d) for d in data['dot']]
