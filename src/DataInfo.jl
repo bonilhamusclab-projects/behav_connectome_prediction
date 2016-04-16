@@ -27,6 +27,8 @@ get_data(d::DataInfo) = begin
   (full[valid_rows, [predictors; covars; target_col]], predictors, covars, target_col)
 end
 
+
+typealias XY Tuple{Matrix{Float64}, Vector{Float64}}
 get_Xy_mat(d::DataInfo) = begin
   data::DataFrame, predictors::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
     get_data(d)

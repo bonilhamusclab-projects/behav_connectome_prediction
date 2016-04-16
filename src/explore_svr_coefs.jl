@@ -72,6 +72,9 @@ function ratios_to_counts(ratios::AbstractVector{Float64}, n::Int64)
 end
 
 
+ratio_to_count(ratio::Float64, n::Int64) = ratios_to_counts([ratio], n)[1]
+
+
 function learning_curve(svr::PyObject,
                         lc_cvg_gen::Function,
                         o::Outcome,
@@ -417,7 +420,6 @@ function ensemble(outcome::Outcome, region::Region=left_select,
     ret[1]
   end
 
-  typealias XY Tuple{Matrix{Float64}, Vector{Float64}}
   XYs::Dict{DataSet, XY} = both_ds(XY) do d
     di::DataInfo = dis[d]
     ixs::Vector{Int64} = common_id_ixs(di)
@@ -454,4 +456,55 @@ function ensemble(outcome::Outcome, region::Region=left_select,
 
   cvg::CrossValGenerator = get_cvg(RandomSub, n_perms, num_samples)
   cross_validate(fit, test, num_samples, cvg)
+end
+
+
+
+macro verbose_print(ex)
+  :( verbose && println($ex) )
+end
+
+function test_c_gen(
+    ixs::AbstractVector{Int64},
+    o::Outcome,
+    dataset::DataSet;
+    n_schemes::Int64 = 20,
+    verbose::Bool=false)
+
+  X::Matrix{Float64}, y::Vector{Float64} = begin
+    Xy::XY = get_Xy_mat(o, diff_wpm,
+                        dataset=dataset,
+                        region=left_select,
+                        subject_group=all_subjects)
+    Xy[1][ixs, :], Xy[2][ixs]
+  end
+
+  num_samples = length(y)
+  num_train::Int64 = ratio_to_count(.8, num_samples)
+
+  @verbose_print "num_samples: $num_samples, num_train: $num_train"
+
+  svr::PyObject = LinearSVR()
+
+  function test_c(C::Float64)
+    svr[:C] = C
+
+    test(svr::PyObject, inds::Vector{Int64}) = r2_score(
+      y[inds], svr[:predict](X[inds, :]))
+
+    fit(inds::Vector{Int64}) = begin
+      svr[:fit](X[inds, :], y[inds])
+      svr
+    end
+
+    cvg::CrossValGenerator = get_cvg(RandomSub, n_schemes, num_samples)
+
+    test_scores = cross_validate(fit, test, num_train, cvg)
+
+    ttest = OneSampleTTest(test_scores)
+
+    @verbose_print ttest
+
+    ttest.t
+  end
 end
