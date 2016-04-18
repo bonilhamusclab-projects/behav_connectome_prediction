@@ -401,71 +401,6 @@ macro set_seed()
 end
 
 
-function ensemble(outcome::Outcome, region::Region=left_select,
-                  conn_C::Float64=5e-3, lesion_C::Float64=50.;
-                  weights::Dict{DataSet, Float64} = Dict(conn => .5, lesion => .5),
-                  n_perms::Int64=1000,
-                  seed::Nullable{Int}=Nullable(1234))
-
-  @set_seed
-
-  svrs::Dict{DataSet, PyObject} = Dict(conn => LinearSVR(C=conn_C),
-                                       lesion => LinearSVR(C=lesion_C))
-
-  both_ds(f::Function, T::Type) = Dict{DataSet, T}(
-    [d => f(d)::T for d in [conn, lesion]])
-
-  dis::Dict{DataSet, DataInfo} = both_ds(DataInfo) do ds
-    DataInfo(outcome, diff_wpm, all_subjects, region, ds)
-  end
-
-  ids(di::DataInfo) = get_full(di)[:id]
-  common_ids::Vector{UTF8String} = intersect(ids(dis[conn]), ids(dis[lesion]))
-  common_id_ixs(di::DataInfo) = map(common_ids) do id
-    ret::Vector{Int64} = find(ids(di) .== id)
-    @assert length(ret) == 1
-    ret[1]
-  end
-
-  XYs::Dict{DataSet, XY} = both_ds(XY) do d
-    di::DataInfo = dis[d]
-    ixs::Vector{Int64} = common_id_ixs(di)
-    (X::Matrix{Float64}, y::Vector{Float64}) = get_Xy_mat(di)
-    X[ixs, :], y[ixs]
-  end
-
-  @assert XYs[conn][2] == XYs[lesion][2]
-
-  fit(inds::Vector{Int64}) = both_ds(PyObject) do d
-    svr::PyObject = svrs[d]
-    (X::Matrix{Float64}, y::Vector{Float64}) = XYs[d]
-    svr[:fit](X[inds, :], y[inds])
-  end
-
-  test(svrs::Dict{DataSet, PyObject}, inds::Vector{Int64}) = begin
-    predictions::Matrix{Float64} = begin
-      ret = zeros(Float64, length(inds), 2)
-      for (ix::Int64, (d::DataSet, svr::PyObject)) in enumerate(svrs)
-        X::Matrix{Float64} = XYs[d][1]
-        ret[:, ix] = svr[:predict](X[inds, :]) .* weights[d]
-      end
-      ret
-    end
-
-    ensemble_predictions::Vector{Float64} = sum(predictions, 2)[:]
-    @assert length(ensemble_predictions) == length(inds)
-
-    y::Vector{Float64} = XYs[lesion][2]
-    r2_score(y[inds], ensemble_predictions)
-  end
-
-  num_samples::Int64 = length(common_ids)
-
-  cvg::CrossValGenerator = get_cvg(RandomSub, n_perms, num_samples)
-  cross_validate(fit, test, num_samples, cvg)
-end
-
-
 function explore_C_gen(
     ixs::AbstractVector{Int64},
     o::Outcome,
@@ -484,7 +419,7 @@ function explore_C_gen(
   num_samples = length(y)
   cvg::CrossValGenerator = get_cvg(RandomSub, n_iters, num_samples)
 
-  info("num_samples: $num_samples")
+  debug("num_samples: $num_samples")
 
   svr::PyObject = LinearSVR()
 
@@ -507,9 +442,9 @@ function explore_C_gen(
 
     test_scores = cross_validate(fit, test, num_samples, cvg)
 
-    info("C: $C")
-    info("mean test scores: $(mean(test_scores))")
-    info("mean train scores: $(mean(train_scores))")
+    debug("C: $C")
+    debug("mean test scores: $(mean(test_scores))")
+    debug("mean train scores: $(mean(train_scores))")
 
     test_scores, train_scores
   end
@@ -561,27 +496,6 @@ function simple_newton(fn::Function, y::Float64,
 end
 
 
-function optimize_to_range(
-    fn::Function
-    ;max_score::Float64=.8,
-    min_score::Float64=.2,
-    max_param::Float64=5000.,
-    min_param::Float64=5e-5)
-
-  max_fn(param::Float64) = abs(fn(param) - max_score)
-  min_fn(param::Float64) = abs(fn(param) - min_score)
-
-  optimize_fn(fn::Function) = optimize(fn, min_param, max_param).minimum
-
-  range_high::Float64 = optimize_fn(max_fn)
-
-  range_low::Float64 = optimize_fn(min_fn)
-
-  range_low, range_high
-
-end
-
-
 function find_optimum_C(ixs::AbstractVector{Int64},
                         o::Outcome, d::DataSet)
   scores_fn_gen(n_iters::Int64) = explore_C_gen(ixs, o, d, n_iters=n_iters)
@@ -601,8 +515,92 @@ function find_optimum_C(ixs::AbstractVector{Int64},
     ret_min, ret_max
   end
 
-  info("will now find best test score")
+  debug("will now find best test score")
   scores_fn::Function = scores_fn_gen(50)
   get_test_scores_t(C::Float64) = -1. * OneSampleTTest(scores_fn(C)[1]).t
   optimize(get_test_scores_t, min_C, max_C, rel_tol=.1)
+end
+
+
+typealias DataSetMap Dict{DataSet, Float64}
+function ensemble(outcome::Outcome, region::Region=left_select;
+                  Cs::Nullable{DataSetMap} =
+                    Nullable(DataSetMap(conn => 5e-3, lesion => 50.)),
+                  weights::DataSetMap = Dict(conn => .5, lesion => .5),
+                  n_perms::Int64=1000,
+                  seed::Nullable{Int}=Nullable(1234))
+
+  @set_seed
+
+  ds::AbstractVector{DataSet} = collect(keys(weights))
+
+  all_ds(f::Function, T::Type) = Dict{DataSet, T}(
+    [d => f(d)::T for d in ds])
+
+  svrs::Dict{DataSet, PyObject} = all_ds(d -> LinearSVR(), PyObject)
+
+  dis::Dict{DataSet, DataInfo} = all_ds(DataInfo) do d::DataSet
+    DataInfo(outcome, diff_wpm, all_subjects, region, d)
+  end
+
+  typealias Ids AbstractVector{UTF8String}
+  ids::Dict{DataSet, Ids} = all_ds(Ids) do d
+    get_full(dis[d])[:id]
+  end
+  common_ids::Vector{UTF8String} = intersect(values(ids)...)
+
+  common_id_ixs(d::DataSet) = map(common_ids) do id
+    ret::Vector{Int64} = find(ids[d] .== id)
+    @assert length(ret) == 1
+    ret[1]
+  end
+
+  XYs::Dict{DataSet, XY} = all_ds(XY) do d::DataSet
+    di::DataInfo = dis[d]
+    (X::Matrix{Float64}, y::Vector{Float64}) = get_Xy_mat(di)
+    ixs::Vector{Int64} = common_id_ixs(d)
+    X[ixs, :], y[ixs]
+  end
+
+  all_ys_same::Bool = begin
+    first_y::Vector{Float64} = collect(values(XYs))[1][2]
+    is_same_as_first(acc::Bool, xy::XY) = acc && xy[2] == first_y
+    reduce(is_same_as_first, true, values(XYs))
+  end
+  @assert all_ys_same
+
+  fit(inds::Vector{Int64}) = all_ds(PyObject) do d::DataSet
+    info("about to fit")
+    C::Float64 = if isnull(Cs)
+      find_optimum_C(inds, adw, d).minimum
+    else
+      Cs[d]
+    end
+    svr::PyObject = svrs[d]
+    svr[:C] = C
+    (X::Matrix{Float64}, y::Vector{Float64}) = XYs[d]
+    svr[:fit](X[inds, :], y[inds])
+  end
+
+  test(svrs::Dict{DataSet, PyObject}, inds::Vector{Int64}) = begin
+    predictions::Matrix{Float64} = begin
+      ret = zeros(Float64, length(inds), 2)
+      for (ix::Int64, (d::DataSet, svr::PyObject)) in enumerate(svrs)
+        X::Matrix{Float64} = XYs[d][1]
+        ret[:, ix] = svr[:predict](X[inds, :]) .* weights[d]
+      end
+      ret
+    end
+
+    ensemble_predictions::Vector{Float64} = sum(predictions, 2)[:]
+    @assert length(ensemble_predictions) == length(inds)
+
+    y::Vector{Float64} = XYs[lesion][2]
+    r2_score(y[inds], ensemble_predictions)
+  end
+
+  num_samples::Int64 = length(common_ids)
+
+  cvg::CrossValGenerator = get_cvg(RandomSub, n_perms, num_samples)
+  cross_validate(fit, test, num_samples, cvg)
 end
