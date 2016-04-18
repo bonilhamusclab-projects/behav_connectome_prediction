@@ -2,7 +2,9 @@ using Colors
 using DataFrames
 using HypothesisTests
 using Lazy
+using Logging
 using MLBase
+using Optim
 using PValueAdjust
 using PyCall
 
@@ -227,7 +229,7 @@ function calc_coefs(d::DataInfo,
 
   prediction_info::DataFrame = begin
     ht = ht_info(test_scores)
-    pi = DataFrame(
+    DataFrame(
       mean=mean(test_scores),
       std=std(test_scores),
       t=ht[:t],
@@ -394,13 +396,18 @@ function plot_param_test(pt_res::DataFrame)
 end
 
 
+macro set_seed()
+  :(isnull(seed) || srand(get(seed)))
+end
+
+
 function ensemble(outcome::Outcome, region::Region=left_select,
                   conn_C::Float64=5e-3, lesion_C::Float64=50.;
-                  weights::Dict{DataSet, Float64} = Dict(conn => .2, lesion => .8),
+                  weights::Dict{DataSet, Float64} = Dict(conn => .5, lesion => .5),
                   n_perms::Int64=1000,
                   seed::Nullable{Int}=Nullable(1234))
 
-  isnull(seed) || srand(get(seed))
+  @set_seed
 
   svrs::Dict{DataSet, PyObject} = Dict(conn => LinearSVR(C=conn_C),
                                        lesion => LinearSVR(C=lesion_C))
@@ -408,8 +415,8 @@ function ensemble(outcome::Outcome, region::Region=left_select,
   both_ds(f::Function, T::Type) = Dict{DataSet, T}(
     [d => f(d)::T for d in [conn, lesion]])
 
-  dis::Dict{DataSet, DataInfo} = both_ds(DataInfo) do d
-    DataInfo(outcome, diff_wpm, all_subjects, region, d)
+  dis::Dict{DataSet, DataInfo} = both_ds(DataInfo) do ds
+    DataInfo(outcome, diff_wpm, all_subjects, region, ds)
   end
 
   ids(di::DataInfo) = get_full(di)[:id]
@@ -459,17 +466,12 @@ function ensemble(outcome::Outcome, region::Region=left_select,
 end
 
 
-
-macro verbose_print(ex)
-  :( verbose && println($ex) )
-end
-
-function test_c_gen(
+function explore_C_gen(
     ixs::AbstractVector{Int64},
     o::Outcome,
     dataset::DataSet;
-    n_schemes::Int64 = 20,
-    verbose::Bool=false)
+    n_iters::Int64 = 10,
+    seed::Nullable{Int}=Nullable(1234))
 
   X::Matrix{Float64}, y::Vector{Float64} = begin
     Xy::XY = get_Xy_mat(o, diff_wpm,
@@ -480,31 +482,127 @@ function test_c_gen(
   end
 
   num_samples = length(y)
-  num_train::Int64 = ratio_to_count(.8, num_samples)
+  cvg::CrossValGenerator = get_cvg(RandomSub, n_iters, num_samples)
 
-  @verbose_print "num_samples: $num_samples, num_train: $num_train"
+  info("num_samples: $num_samples")
 
   svr::PyObject = LinearSVR()
 
+  pred(inds::Vector{Int64}) = r2_score(y[inds], svr[:predict](X[inds, :]))
+
+  test(_, inds::Vector{Int64}) = pred(inds)
+
   function test_c(C::Float64)
+    @set_seed
+
     svr[:C] = C
 
-    test(svr::PyObject, inds::Vector{Int64}) = r2_score(
-      y[inds], svr[:predict](X[inds, :]))
-
+    train_scores = zeros(Float64, n_iters)
+    fit_call_count::Int64 = 0
     fit(inds::Vector{Int64}) = begin
+      fit_call_count += 1
       svr[:fit](X[inds, :], y[inds])
-      svr
+      train_scores[fit_call_count] = pred(inds)
     end
 
-    cvg::CrossValGenerator = get_cvg(RandomSub, n_schemes, num_samples)
+    test_scores = cross_validate(fit, test, num_samples, cvg)
 
-    test_scores = cross_validate(fit, test, num_train, cvg)
+    info("C: $C")
+    info("mean test scores: $(mean(test_scores))")
+    info("mean train scores: $(mean(train_scores))")
 
-    ttest = OneSampleTTest(test_scores)
-
-    @verbose_print ttest
-
-    ttest.t
+    test_scores, train_scores
   end
+
+end
+
+
+
+type NewtionRecusionState
+  best_x::Float64
+  best_diff::Float64
+  current_iter::Int64
+end
+
+function NewtionRecusionState(;best_x::Float64 = Inf,
+                              best_diff::Float64=Inf,
+                              current_iter::Int64 = 1)
+  NewtionRecusionState(best_x, best_diff, current_iter)
+end
+
+function simple_newton(fn::Function, y::Float64,
+                      min_x::Float64, max_x::Float64;
+                       n_iters::Int64 = 100,
+                       min_delta_ratio::Float64 = .1,
+                       _recursion_state::NewtionRecusionState = NewtionRecusionState())
+
+  @assert max_x > min_x
+
+  mid_x::Float64 = (max_x + min_x)/2
+  y_guess::Float64 = fn(mid_x)
+
+  curr_diff::Float64 = abs(y - y_guess)
+
+  _recursion_state.current_iter += 1
+
+  if curr_diff < _recursion_state.best_diff
+    _recursion_state.best_diff = curr_diff
+    _recursion_state.best_x = mid_x
+  end
+
+  if curr_diff < min_delta_ratio || _recursion_state.current_iter >= n_iters
+    return _recursion_state.best_x
+  end
+
+  max_x::Float64, min_x::Float64 = y_guess > y ? (mid_x, min_x) : (max_x, mid_x)
+
+  simple_newton(fn, y, min_x, max_x, min_delta_ratio=min_delta_ratio,
+                _recursion_state=_recursion_state)
+end
+
+
+function optimize_to_range(
+    fn::Function
+    ;max_score::Float64=.8,
+    min_score::Float64=.2,
+    max_param::Float64=5000.,
+    min_param::Float64=5e-5)
+
+  max_fn(param::Float64) = abs(fn(param) - max_score)
+  min_fn(param::Float64) = abs(fn(param) - min_score)
+
+  optimize_fn(fn::Function) = optimize(fn, min_param, max_param).minimum
+
+  range_high::Float64 = optimize_fn(max_fn)
+
+  range_low::Float64 = optimize_fn(min_fn)
+
+  range_low, range_high
+
+end
+
+
+function find_optimum_C(ixs::AbstractVector{Int64},
+                        o::Outcome, d::DataSet)
+  scores_fn_gen(n_iters::Int64) = explore_C_gen(ixs, o, d, n_iters=n_iters)
+
+  min_C::Float64, max_C::Float64 = begin
+    n_iters = 10
+    get_train_scores_mn(C::Float64) = mean(scores_fn_gen(n_iters)(C)[2])
+    min_score::Float64 = .2
+    max_score::Float64 = .8
+
+    ret_max::Float64 = simple_newton(get_train_scores_mn, max_score,
+                                   5e-4, 5000.)
+
+    ret_min::Float64 = simple_newton(get_train_scores_mn, min_score,
+                                   5e-4, ret_max)
+
+    ret_min, ret_max
+  end
+
+  info("will now find best test score")
+  scores_fn::Function = scores_fn_gen(50)
+  get_test_scores_t(C::Float64) = -1. * OneSampleTTest(scores_fn(C)[1]).t
+  optimize(get_test_scores_t, min_C, max_C, rel_tol=.1)
 end
