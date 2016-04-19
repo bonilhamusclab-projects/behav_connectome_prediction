@@ -258,8 +258,7 @@ function State(n_schemes::Int64)
         Nullable{CRange}())
 end
 
-function run()
-  n_schemes::Int64 = 1
+function run(n_schemes::Int64=1000)
 
   state_map::Dict{DataInfo, State} = Dict{DataInfo, State}()
 
