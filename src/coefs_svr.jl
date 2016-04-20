@@ -10,8 +10,7 @@ include("svr_base.jl")
 
 
 function calc_coefs(d::DataInfo,
-                    C::Float64;
-                    n_perms::Int64=1000,
+                    Cs::AbstractVector{Float64};
                     seed::Nullable{Int}=Nullable(1234))
 
   isnull(seed) || srand(get(seed))
@@ -19,9 +18,9 @@ function calc_coefs(d::DataInfo,
   X::Matrix{Float64}, y::Vector{Float64} = get_Xy_mat(d)
 
   num_samples::Int64 = length(y)
-
-  svr = LinearSVR(C=C)
-  cvg::CrossValGenerator = get_cvg(RandomSub, n_perms, num_samples)
+  num_randomizations::Int64 = length(Cs)
+  svr = LinearSVR()
+  cvg::CrossValGenerator = get_cvg(RandomSub, num_randomizations, num_samples)
 
   predictors = get_predictors(d)
   n_predictors = length(predictors)
@@ -30,7 +29,7 @@ function calc_coefs(d::DataInfo,
     ret = DataFrame()
     for p in predictors
       ###Hack to keep it float64 while being NA
-      ret[p] = repmat([-Inf], n_perms)
+      ret[p] = repmat([-Inf], num_randomizations)
       ret[ret[p] .== -Inf, :] = NA
     end
     ret
@@ -43,6 +42,7 @@ function calc_coefs(d::DataInfo,
     fit_fn(inds::Vector{Int64}) = begin
       state[:fit_call] += 1
       println(state[:fit_call])
+      svr[:C] = Cs[state[:fit_call]]
       svr[:fit](X[inds, :], y[inds])
       for (ix, c) in enumerate(svr[:coef_])
         coefs[state[:fit_call], predictors[ix]] = c
@@ -83,7 +83,7 @@ function calc_coefs(d::DataInfo,
       right_p=ht[:right_p],
       left_p=ht[:left_p],
       both_p=ht[:both_p],
-      num_perms=n_perms)
+      num_randomizations=num_randomizations)
   end
 
   predictor_info::DataFrame = begin
@@ -116,12 +116,12 @@ function calc_coefs(d::DataInfo,
 end
 
 
-function calc_all_coefs(cs::Dict{DataInfo, Float64})
+function calc_all_coefs(cs::Dict{DataInfo, Array{Float64, 1}})
 
   ret = Dict{DataInfo, Dict{Symbol, DataFrame}}()
-  for (di::DataInfo, C::Float64) in cs
+  for (di::DataInfo, Cs::AbstractVector{Float64}) in cs
     println(di)
-    ret[di] = calc_coefs(di, C)
+    ret[di] = calc_coefs(di, Cs)
   end
 
   ret

@@ -115,7 +115,10 @@ end
 
 function find_optimum_C(ixs::AbstractVector{Int64},
                         o::Outcome, d::DataSet;
-                        c_range::Nullable{CRange} = Nullable{CRange}())
+                        c_range::Nullable{CRange} = Nullable{CRange}(),
+                        score_train_scores::Function = mean,
+                        score_test_scores::Function = arr::AbstractVector{Float64} -> OneSampleTTest(arr).t
+                        )
   calc_scores_g(n_iters::Int64) = calc_scores_gen(ixs, o, d, n_iters=n_iters)
 
   min_C::Float64, max_C::Float64 = begin
@@ -125,16 +128,16 @@ function find_optimum_C(ixs::AbstractVector{Int64},
     else
 
       n_iters = 10
-      get_train_scores_mn(C::Float64) = mean(calc_scores_g(n_iters)(C)[2])
+      score_train_scores(C::Float64) = score_train_scores(calc_scores_g(n_iters)(C)[2])
       min_score::Float64 = .2
       max_score::Float64 = .8
 
-      ret_max::Float64 = simple_newton(get_train_scores_mn, max_score,
+      ret_max::Float64 = simple_newton(score_train_scores, max_score,
                                        5e-4, 5000.)
 
       debug("max C: $ret_max")
 
-      ret_min::Float64 = simple_newton(get_train_scores_mn, min_score,
+      ret_min::Float64 = simple_newton(score_train_scores, min_score,
                                        5e-4, ret_max)
 
       debug("min C: $ret_min")
@@ -146,7 +149,7 @@ function find_optimum_C(ixs::AbstractVector{Int64},
   debug("will now find best test score")
 
   get_test_scores(C::Float64) = calc_scores_g(50)(C)[1]
-  get_test_scores_t(C::Float64) = -1. * OneSampleTTest(get_test_scores(C)).t
+  get_test_scores_t(C::Float64) = -1. * score_test_scores(get_test_scores(C))
   C::Float64 = optimize(get_test_scores_t, min_C, max_C, rel_tol=.1).minimum
 
   (C, min_C, max_C)
@@ -155,14 +158,20 @@ end
 
 function find_optimum_C(ixs::AbstractVector{Int64},
                         di::DataInfo;
-                        c_range::Nullable{CRange} = Nullable{CRange}())
-  find_optimum_C(ixs, di.outcome, di.dataset, c_range=c_range)
+                        c_range::Nullable{CRange} = Nullable{CRange}(),
+                        score_train_scores::Function = mean,
+                        score_test_scores::Function =
+                          arr::AbstractVector{Float64} -> OneSampleTTest(arr).t)
+  find_optimum_C(ixs, di.outcome, di.dataset,
+                 c_range=c_range, score_train_scores=score_train_scores,
+                 score_test_scores=score_test_scores)
 end
 
 
 typealias DataSetMap Dict{DataSet, Float64}
 
-function ensemble(outcome::Outcome, get_C::Function,
+function ensemble(outcome::Outcome,
+                  get_C::Function,
                   region::Region=left_select;
                   weights::DataSetMap = Dict(conn => .5, lesion => .5),
                   n_schemes::Int64=1000,
