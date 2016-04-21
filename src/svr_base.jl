@@ -15,7 +15,7 @@ macro l2_from_true(x)
 end
 
 
-function r2_score(y_true::Vector{Float64}, y_pred::Vector{Float64})
+function r2_score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T})
 
   numerator::Float64 = @l2_from_true y_pred
   denominator::Float64 = @l2_from_true mean(y_true)
