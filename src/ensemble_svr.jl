@@ -143,10 +143,10 @@ function find_optimum_C(ixs::AbstractVector{Int64},
 
 
   get_test_scores(C::Float64) = calc_scores_g(50)(C)[1]
-  get_test_scores_t(C::Float64, verbose=true) = -1. * score_test_scores(get_test_scores(C))
+  get_test_scores_t(C::Float64) = -1. * score_test_scores(get_test_scores(C))
   C::Float64 = optimize(get_test_scores_t, min_C, max_C, rel_tol=.1).minimum
   
-  debug(@sprintf "best C %3.2e" C)
+  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset $d" C -1 * get_test_scores_t(C))
 
   (C, min_C, max_C)
 end
