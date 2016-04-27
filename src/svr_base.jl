@@ -1,5 +1,6 @@
 using DataFrames
 using Lazy
+using Memoize
 using MLBase
 using PyCall
 
@@ -24,7 +25,7 @@ function r2_score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T
 end
 
 
-function get_Xy_mat(o::Outcome,
+@memoize function get_Xy_mat(o::Outcome,
                     target::Target;
                     dataset::DataSet=conn,
                     region::Region=full_brain,

@@ -28,8 +28,6 @@ function calc_scores_gen(
   num_samples = length(y)
   cvg::CrossValGenerator = get_cvg(RandomSub, n_iters, num_samples)
 
-  debug("num_samples: $num_samples")
-
   svr::PyObject = LinearSVR()
 
   pred(inds::Vector{Int64}) = r2_score(y[inds], svr[:predict](X[inds, :]))
@@ -37,7 +35,6 @@ function calc_scores_gen(
   test(_, inds::Vector{Int64}) = pred(inds)
 
   function calc_scores(C::Float64)
-    @set_seed
 
     svr[:C] = C
 
@@ -51,9 +48,8 @@ function calc_scores_gen(
 
     test_scores = cross_validate(fit, test, num_samples, cvg)
 
-    debug("C: $C")
-    debug("mean test scores: $(mean(test_scores))")
-    debug("mean train scores: $(mean(train_scores))")
+    debug("dataset: $dataset")
+    debug(@sprintf "C: %3.2e, test mean: %3.2e test T: %3.2e, train mean: %3.2e" C mean(test_scores) OneSampleTTest(test_scores).t mean(train_scores))
 
     test_scores, train_scores
   end
@@ -113,6 +109,7 @@ immutable CRange
   end
 end
 
+
 function find_optimum_C(ixs::AbstractVector{Int64},
                         o::Outcome, d::DataSet;
                         c_range::Nullable{CRange} = Nullable{CRange}(),
@@ -135,22 +132,21 @@ function find_optimum_C(ixs::AbstractVector{Int64},
       ret_max::Float64 = simple_newton(score_train_scores, max_score,
                                        5e-4, 5000.)
 
-      debug("max C: $ret_max")
 
       ret_min::Float64 = simple_newton(score_train_scores, min_score,
                                        5e-4, ret_max)
 
-      debug("min C: $ret_min")
 
       ret_min, ret_max
     end
   end
 
-  debug("will now find best test score")
 
   get_test_scores(C::Float64) = calc_scores_g(50)(C)[1]
-  get_test_scores_t(C::Float64) = -1. * score_test_scores(get_test_scores(C))
+  get_test_scores_t(C::Float64, verbose=true) = -1. * score_test_scores(get_test_scores(C))
   C::Float64 = optimize(get_test_scores_t, min_C, max_C, rel_tol=.1).minimum
+  
+  debug(@sprintf "best C %3.2e" C)
 
   (C, min_C, max_C)
 end
@@ -220,13 +216,10 @@ function ensemble(outcome::Outcome,
   function fit(inds::Vector{Int64})
     scheme_ix += 1
     all_ds(PyObject) do d::DataSet
-      info("about to fit")
-
       C::Float64 = get_C(dis[d], inds, scheme_ix)
 
       svr::PyObject = svrs[d]
       svr[:C] = C
-      info("fit C: $C")
       X::Matrix{Float64} = XYs[d][1]
       svr[:fit](X[inds, :], main_y[inds])
     end
