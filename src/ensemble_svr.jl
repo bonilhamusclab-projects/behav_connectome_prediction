@@ -72,13 +72,16 @@ end
 function simple_newton(fn::Function, y::Float64,
                       min_x::Float64, max_x::Float64;
                        n_iters::Int64 = 100,
-                       min_delta_ratio::Float64 = .1,
+                       min_delta_ratio::Float64 = .05,
                        _recursion_state::NewtionRecusionState = NewtionRecusionState())
 
   @assert max_x > min_x
 
   mid_x::Float64 = (max_x + min_x)/2
   y_guess::Float64 = fn(mid_x)
+
+  debug(@sprintf "Newton iter: %d, y_guess: %3.2f, y: %3.2f" _recursion_state.current_iter y_guess y)
+  debug(@sprintf "Newton mid_x: %3.2e" mid_x)
 
   curr_diff::Float64 = abs(y - y_guess)
 
@@ -90,6 +93,7 @@ function simple_newton(fn::Function, y::Float64,
   end
 
   if curr_diff < min_delta_ratio || _recursion_state.current_iter >= n_iters
+    debug("newton done")
     return _recursion_state.best_x
   end
 
@@ -145,8 +149,8 @@ function find_optimum_C(ixs::AbstractVector{Int64},
   get_test_scores(C::Float64) = calc_scores_g(50)(C)[1]
   get_test_scores_t(C::Float64) = -1. * score_test_scores(get_test_scores(C))
   C::Float64 = optimize(get_test_scores_t, min_C, max_C, rel_tol=.1).minimum
-  
-  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset $d" C -1 * get_test_scores_t(C))
+
+  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset %s" C -1 * get_test_scores_t(C) d)
 
   (C, min_C, max_C)
 end
