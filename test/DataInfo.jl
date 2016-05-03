@@ -6,20 +6,20 @@ include("test_utils.jl")
 @data_include("helpers.jl")
 
 
-function test_get_data(di::DataInfo,
+function testGetData(di::DataInfo,
                        expected_num_rows::Int64,
                        expected_target_col::Symbol,
                        expected_covars::Vector{Symbol},
                        expected_num_edges::Int64)
   data::DataFrame, edges::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
-    get_data(di)
+    getData(di)
 
   @test length(edges) == expected_num_edges
   @test covars == expected_covars
   @test size(data) == (expected_num_rows, expected_num_edges + length(expected_covars) + 1)
 end
 
-test_get_data(measure::Outcome,
+testGetData(measure::Outcome,
         subject_group::SubjectGroup,
         s_count::Int64,
         region::Region,
@@ -30,15 +30,15 @@ test_get_data(measure::Outcome,
   println(to_string(di))
 
   target_col = symbol(target, "_", measure)
-  test_get_data(di, s_count, target_col, covars, e_count)
+  testGetData(di, s_count, target_col, covars, e_count)
 end
 
-test_fn = test_get_data
+test_fn = testGetData
 
 @test_all_combos
 
 
-test_get_Xy_mat(measure::Outcome,
+testGetXyMat(measure::Outcome,
         subject_group::SubjectGroup,
         s_count::Int64,
         region::Region,
@@ -46,7 +46,7 @@ test_get_Xy_mat(measure::Outcome,
         target::Target,
         covars::Vector{Symbol}) = begin
   di = DataInfo(measure, target, subject_group, region, conn)
-  X, y = get_Xy_mat(di)
+  X, y = getXyMat(di)
 
   @test size(X) == (s_count, e_count)
   @test length(y) == s_count
@@ -54,35 +54,35 @@ test_get_Xy_mat(measure::Outcome,
   @test isa(y, Vector{Float64})
 end
 
-test_fn = test_get_Xy_mat
+test_fn = testGetXyMat
 
 
 @test_all_combos
 
 
-create_was_called() = Dict([ i => false for i in
+createWasCalled() = Dict([ i => false for i in
                    [adw, atw,
                     diff_wpm, se,
                     all_subjects, improved, poor_pd, poor_pd_1,
                     full_brain, left_select, left,
                     conn, lesion] ])
 
-was_called = create_was_called()
+was_called = createWasCalled()
 
-update_was_called(di::DataInfo) = begin
-  for f in fieldnames(di)
+updateWasCalled(di::DataInfo) = begin
+  for f in setdiff(fieldnames(di), [:include_covars])
     was_called[di.(f)] = true
   end
   di
 end
 
-for_all_combos(fn=update_was_called)
+forAllCombos(fn=updateWasCalled)
 
 for k in keys(was_called)
   @test was_called[k]
 end
 
-was_called = create_was_called()
+was_called = createWasCalled()
 
 filter_vals = Dict(SubjectGroup => [all_subjects],
                    Outcome => [adw],
@@ -90,7 +90,7 @@ filter_vals = Dict(SubjectGroup => [all_subjects],
                    Region => [left_select],
                    DataSet => [conn])
 
-for_all_combos(fn=update_was_called,
+forAllCombos(fn=updateWasCalled,
                subject_groups=filter_vals[SubjectGroup],
                outcomes=filter_vals[Outcome],
                targets=filter_vals[Target],

@@ -2,7 +2,7 @@ macro data_include(f)
   quote
     f_name = $f
     src_dir = joinpath(dirname(pwd()), "src")
-    include("$src_dir/$f_name")
+    include("$(src_dir)/$(f_name)")
   end
 end
 
@@ -17,13 +17,13 @@ macro test_all_combos()
       se => Dict( atw => [:pd_atw], adw => [:pd_adw]),
       diff_wpm => Dict( atw => [], adw => []))
     num_subjects = Dict(atw =>
-                        Dict(all_subjects => size(get_full(conn, atw), 1),
-                             improved => sum(get_full(conn, atw)[:atw_diff_wpm] .> 0),
-                             poor_pd => sum(get_full(conn, atw)[:pd_atw_z] .< 0)),
+                        Dict(all_subjects => size(getFull(conn, atw), 1),
+                             improved => sum(getFull(conn, atw)[:atw_diff_wpm] .> 0),
+                             poor_pd => sum(getFull(conn, atw)[:pd_atw_z] .< 0)),
                         adw =>
-                        Dict(all_subjects => size(get_full(conn, adw), 1),
-                             improved => sum(get_full(conn, adw)[:adw_diff_wpm] .> 0),
-                             poor_pd => sum(get_full(conn, adw)[:pd_adw_z] .< 0))
+                        Dict(all_subjects => size(getFull(conn, adw), 1),
+                             improved => sum(getFull(conn, adw)[:adw_diff_wpm] .> 0),
+                             poor_pd => sum(getFull(conn, adw)[:pd_adw_z] .< 0))
                         )
     num_edges = Dict(full_brain => edge_count(189),
                      left => edge_count(95),

@@ -9,20 +9,20 @@ include("helpers.jl")
 include("svr_base.jl")
 
 
-function calc_coefs(d::DataInfo,
+function calcCoefs(d::DataInfo,
                     Cs::AbstractVector{Float64};
                     seed::Nullable{Int}=Nullable(1234))
 
   isnull(seed) || srand(get(seed))
 
-  X::Matrix{Float64}, y::Vector{Float64} = get_Xy_mat(d)
+  X::Matrix{Float64}, y::Vector{Float64} = getXyMat(d)
 
   num_samples::Int64 = length(y)
   num_randomizations::Int64 = length(Cs)
   svr = LinearSVR()
   cvg::CrossValGenerator = get_cvg(RandomSub, num_randomizations, num_samples)
 
-  predictors = get_predictors(d)
+  predictors = getPredictors(d)
   n_predictors = length(predictors)
 
   coefs::DataFrame = begin
@@ -51,7 +51,7 @@ function calc_coefs(d::DataInfo,
     end
 
     test_fn(c::PyObject, inds::Vector{Int64}) =
-      r2_score(y[inds], c[:predict](X[inds, :]))
+      r2Score(y[inds], c[:predict](X[inds, :]))
 
     (fit_fn, test_fn)
   end
@@ -116,12 +116,12 @@ function calc_coefs(d::DataInfo,
 end
 
 
-function calc_all_coefs(cs::Dict{DataInfo, Array{Float64, 1}})
+function calcAllCoefs(cs::Dict{DataInfo, Array{Float64, 1}})
 
   ret = Dict{DataInfo, Dict{Symbol, DataFrame}}()
   for (di::DataInfo, Cs::AbstractVector{Float64}) in cs
     println(di)
-    ret[di] = calc_coefs(di, Cs)
+    ret[di] = calcCoefs(di, Cs)
   end
 
   ret
@@ -129,16 +129,16 @@ function calc_all_coefs(cs::Dict{DataInfo, Array{Float64, 1}})
 end
 
 
-function calc_lesion_coefs()
-  mk_di(o::Outcome, r::Region) = DataInfo(o, diff_wpm, all_subjects, r, lesion)
+function calcLesionCoefs()
+  mkDi(o::Outcome, r::Region) = DataInfo(o, diff_wpm, all_subjects, r, lesion)
   regions::Vector{Region} = Region[left_select, left, full_brain]
-  cs::Dict{DataInfo, Float64} = [mk_di(o, r) => 10. for r in regions,
+  cs::Dict{DataInfo, Float64} = [mkDi(o, r) => 10. for r in regions,
                                  o in Outcome[adw, atw]]
-  calc_all_coefs(cs)
+  calcAllCoefs(cs)
 end
 
 
-function save_calc_coefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, DataFrame}})
+function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, DataFrame}})
   for di::DataInfo in keys(calc_all_coefs_ret)
     dir = joinpath("$(data_dir())/step4/svr/")
     isdir(dir) || mkpath(dir)

@@ -18,7 +18,7 @@ function calc_scores_gen(
     seed::Nullable{Int}=Nullable(1234))
 
   X::Matrix{Float64}, y::Vector{Float64} = begin
-    Xy::XY = get_Xy_mat(o, diff_wpm,
+    Xy::XY = getXyMat(o, diff_wpm,
                         dataset=dataset,
                         region=left_select,
                         subject_group=all_subjects)
@@ -30,7 +30,7 @@ function calc_scores_gen(
 
   svr::PyObject = LinearSVR()
 
-  pred(inds::Vector{Int64}) = r2_score(y[inds], svr[:predict](X[inds, :]))
+  pred(inds::Vector{Int64}) = r2Score(y[inds], svr[:predict](X[inds, :]))
 
   test(_, inds::Vector{Int64}) = pred(inds)
 
@@ -192,7 +192,7 @@ function ensemble(outcome::Outcome,
 
   typealias Ids AbstractVector{UTF8String}
   ids::Dict{DataSet, Ids} = all_ds(Ids) do d
-    get_full(dis[d])[:id]
+    getFull(dis[d])[:id]
   end
   common_ids::Vector{UTF8String} = intersect(values(ids)...)
 
@@ -204,7 +204,7 @@ function ensemble(outcome::Outcome,
 
   XYs::Dict{DataSet, XY} = all_ds(XY) do d::DataSet
     di::DataInfo = dis[d]
-    (X::Matrix{Float64}, y::Vector{Float64}) = get_Xy_mat(di)
+    (X::Matrix{Float64}, y::Vector{Float64}) = getXyMat(di)
     ixs::Vector{Int64} = common_id_ixs(d)
     X[ixs, :], y[ixs]
   end
@@ -242,7 +242,7 @@ function ensemble(outcome::Outcome,
     ensemble_predictions::Vector{Float64} = sum(predictions, 2)[:]
     @assert length(ensemble_predictions) == length(inds)
 
-    r2_score(main_y[inds], ensemble_predictions)
+    r2Score(main_y[inds], ensemble_predictions)
   end
 
   num_samples::Int64 = length(common_ids)

@@ -70,7 +70,7 @@ order,name,desc
 137,EC_L,external capsule left
 139,CGC_L,cingulum (cingulate gyrus) left
 141,CGH_L,cingulum (hippocampus) left
-143,Fx/ST_L,fornix (cres) / Stria terminalis (can not be resolved with current resolution) left
+143,Fx_ST_L,fornix (cres) / Stria terminalis (can not be resolved with current resolution) left
 145,Fx_L,Fornix (column and body of fornix) left
 147,IFO_L,Inferior fronto-occipital fasciculus left
 149,PTR_L,Posterior thalamic radiation (include optic radiation) left

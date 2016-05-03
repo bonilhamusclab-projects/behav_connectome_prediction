@@ -13,24 +13,25 @@ macro update_covar(k, v)
   )
 end
 
-function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
+
+function calcCoefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
                     covars::Vector{Symbol}=Symbol[])
 
   num_edges = length(edges)
 
-  mk_zeros = () -> zeros(Float64, num_edges)
+  mkZeros = () -> zeros(Float64, num_edges)
 
-  coefs = mk_zeros()
-  cors = mk_zeros()
+  coefs = mkZeros()
+  cors = mkZeros()
   pvalues = ones(Float64, num_edges)
-  tscores = mk_zeros()
+  tscores = mkZeros()
 
   num_covars = length(covars)
   covar_dt = begin
-    mk_ones = () -> ones(Float64, num_edges)
+    mkOnes = () -> ones(Float64, num_edges)
     ret = Dict{Symbol, Vector{Float64}}()
     for c in covars
-      for (t, fn) in (("coef", mk_zeros), ("pvalue", mk_ones), ("tscore", mk_zeros))
+      for (t, fn) in (("coef", mkZeros), ("pvalue", mkOnes), ("tscore", mkZeros))
         k::Symbol = symbol(c, "_", t)
         ret[k] = fn()
       end
@@ -47,6 +48,7 @@ function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
     if !isempty(covars)
       fm_str = string(fm_str, " + ", join(covars, " + "))
     end
+    
     fm = eval(parse(fm_str))
     ct = coeftable(lm(fm, df))
     coefs[ix], tscores[ix], pvalues[ix] = ct.mat[2, [1, 3, 4]]
@@ -61,9 +63,7 @@ function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
     cors[ix] = cor(df[edge], df[target])
   end
 
-  edge_names = create_edge_names(edges)
-
-  ret = DataFrame(coef=coefs, pvalue=pvalues, tscore=tscores, edge=edges, edge_name=edge_names, cor_coef=cors)
+  ret = DataFrame(coef=coefs, pvalue=pvalues, tscore=tscores, edge=edges, cor_coef=cors)
   ret[:pvalue_adj] = padjust(ret[:pvalue], BenjaminiHochberg)
 
   for c in keys(covar_dt)
@@ -77,20 +77,19 @@ function calc_coefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
 end
 
 
-function calc_all_measures(data_targets::Vector{DataInfo})
+function calcAllMeasures(data_targets::Vector{DataInfo})
 
   ret = Dict()
 
   for d::DataInfo in data_targets
-    d_string = to_string(d)
-    println(d_string)
+    println(d)
 
     data::DataFrame, edges::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
-      get_data(d)
+      getData(d)
 
-    coefs = calc_coefs(data, target_col, edges, covars)
+    coefs = calcCoefs(data, target_col, edges, covars)
 
-    ret[symbol(d_string)] = sort(coefs, cols=:pvalue)
+    ret[d] = sort(coefs, cols=:pvalue)
   end
 
   ret
@@ -100,57 +99,52 @@ end
 macro calc_all_measures()
   quote
     data_targets::Vector{DataInfo} =
-      [DataInfo(m, t, s, r)
-       for m::Outcome in (atw, adw),
+      [DataInfo(o, t, s, r, d)
+       for o::Outcome in (atw, adw),
        t::Target in (se, diff_wpm),
-       r::Region in (full_brain, left, left_select)][:]
-    calc_all_measures(data_targets)
+       r::Region in (full_brain, left, left_select),
+       d::DataSet in (conn, lesion)
+       ][:]
+    calcAllMeasures(data_targets)
   end
 end
 
 
-function calc_all_subjects()
+function calcAllSubjects()
   s::SubjectGroup= all_subjects
 
   @calc_all_measures
 end
 
 
-function calc_improved_subjects()
+function calcImprovedSubjects()
   s::SubjectGroup = improved
 
   @calc_all_measures
 end
 
 
-function calc_poor_pd_subjects()
+function calcPoorPdSubjects()
   s::SubjectGroup = poor_pd
 
   @calc_all_measures
 end
 
 
-function calc_all_scenarios()
-  ret = Dict()
-  ret[all_subjects] = calc_all_subjects()
-  ret[improved] = calc_improved_subjects()
-  ret[poor_pd] = calc_poor_pd_subjects()
-  ret
+calcAllScenarios() = Dict(
+  union(calcAllSubjects(), calcImprovedSubjects(), calcPoorPdSubjects())
+)
+
+
+saveCalcScenarioResults(res::Dict, dir::AbstractString) = for di::DataInfo in keys(res)
+  df = res[di]::DataFrame
+  writetable(joinpath(dir, "$(di).csv"), df)
 end
 
 
-function save_calc_scenario_results(res::Dict, dir::AbstractString)
-  for k in keys(res)
-    df = res[k]::DataFrame
-    writetable(joinpath("$dir", "$k.csv"), df)
-  end
-end
+function saveAllScenarios(res::Dict)
+  dir = "../data/step4/linear_reg/"
+  isdir(dir) || mkpath(dir)
 
-function save_all_scenarios(res::Dict)
-  for (s::SubjectGroup, sr) in res
-    dir = joinpath("data/step4/linear_reg/", "$s")
-    isdir(dir) || mkpath(dir)
-
-    save_calc_scenario_results(sr, dir)
-  end
+  saveCalcScenarioResults(res, dir)
 end

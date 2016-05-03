@@ -16,7 +16,7 @@ macro l2_from_true(x)
 end
 
 
-function r2_score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T})
+function r2Score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T})
 
   numerator::Float64 = @l2_from_true y_pred
   denominator::Float64 = @l2_from_true mean(y_true)
@@ -25,12 +25,12 @@ function r2_score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T
 end
 
 
-@memoize function get_Xy_mat(o::Outcome,
+@memoize function getXyMat(o::Outcome,
                     target::Target;
                     dataset::DataSet=conn,
                     region::Region=full_brain,
                     subject_group::SubjectGroup=all_subjects)
-  get_Xy_mat(DataInfo(o, target, subject_group, region, dataset))
+  getXyMat(DataInfo(o, target, subject_group, region, dataset))
 end
 
 
@@ -41,21 +41,21 @@ function learning_curve(svr::PyObject,
                         region::Region,
                         subject_group::SubjectGroup,
                         train_ratios::AbstractVector{Float64};
-                        score_fn::Function=r2_score)
+                        score_fn::Function=r2Score)
 
-  X, y = get_Xy_mat(o, diff_wpm, dataset=dataset, region=region, subject_group=subject_group)
+  X, y = getXyMat(o, diff_wpm, dataset=dataset, region=region, subject_group=subject_group)
   num_samples::Int64 = length(y)
 
   train_sizes::Vector{Int64} = ratios_to_counts(train_ratios, num_samples)
   train_sizes = train_sizes[train_sizes .> 2]
 
   ret::DataFrame = begin
-    mk_zeros = () -> zeros(Float64, length(train_sizes))
+    mkZeros = () -> zeros(Float64, length(train_sizes))
 
-    DataFrame(train_mn=mk_zeros(),
-              train_std=mk_zeros(),
-              test_mn=mk_zeros(),
-              test_std=mk_zeros(),
+    DataFrame(train_mn=mkZeros(),
+              train_std=mkZeros(),
+              test_mn=mkZeros(),
+              test_std=mkZeros(),
               train_size=train_sizes)
   end
 
