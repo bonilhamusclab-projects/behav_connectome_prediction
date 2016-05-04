@@ -89,7 +89,7 @@ function calcCoefs(d::DataInfo,
   predictor_info::DataFrame = begin
     pr = DataFrame()
     pr[symbol(d.dataset)] = predictors
-    pr[symbol(d.dataset, :_name)] = create_predictor_names(predictors, d.dataset)
+    pr[symbol(d.dataset, :_name)] = createPredictorNames(predictors, d.dataset)
 
 
     pred_apply(fn::Function) = [fn(dropna(coefs[p])) for p in predictors]
