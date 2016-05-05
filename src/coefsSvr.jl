@@ -6,7 +6,7 @@ using PValueAdjust
 
 include("DataInfo.jl")
 include("helpers.jl")
-include("svr_base.jl")
+include("svrBase.jl")
 
 
 function calcCoefs(d::DataInfo,

@@ -2,9 +2,9 @@ using Base.Test
 using MLBase
 using PyCall
 
-include("test_utils.jl")
+include("testUtls.jl")
 
-@data_include("svr_base.jl")
+@data_include("svrBase.jl")
 
 
 py_r2_score = begin
