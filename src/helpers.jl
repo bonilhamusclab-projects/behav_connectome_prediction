@@ -1,4 +1,5 @@
 using DataFrames
+using HypothesisTests
 using Lazy
 using Memoize
 
@@ -134,3 +135,20 @@ getCovarsForTarget(t::Target, m::Outcome) = @switch t begin
   se; Symbol[symbol("pd_$(m)")]
   diff_wpm; Symbol[]
 end
+
+
+typealias HtInfo Dict{Symbol, Float64}
+
+function htInfo(ht::HypothesisTests.HypothesisTest)
+  ret = Dict{Symbol, Float64}()
+
+  for tail in [:right, :left, :both]
+    p_sym = symbol(tail, :_p)
+    ret[p_sym] = pvalue(ht, tail=tail)
+  end
+
+  ret[:t] = ht.t
+  ret
+end
+
+htInfo(arr::Vector{Float64}) = htInfo(OneSampleTTest(arr))

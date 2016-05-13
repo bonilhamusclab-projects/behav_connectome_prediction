@@ -14,21 +14,21 @@ macro update_covar(k, v)
 end
 
 
-function calcCoefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
+function calcCoefs(df::DataFrame, target::Symbol, predictors::Vector{Symbol},
                     covars::Vector{Symbol}=Symbol[])
 
-  num_edges = length(edges)
+  num_predictors = length(predictors)
 
-  mkZeros = () -> zeros(Float64, num_edges)
+  mkZeros = () -> zeros(Float64, num_predictors)
 
   coefs = mkZeros()
   cors = mkZeros()
-  pvalues = ones(Float64, num_edges)
+  pvalues = ones(Float64, num_predictors)
   tscores = mkZeros()
 
   num_covars = length(covars)
   covar_dt = begin
-    mkOnes = () -> ones(Float64, num_edges)
+    mkOnes = () -> ones(Float64, num_predictors)
     ret = Dict{Symbol, Vector{Float64}}()
     for c in covars
       for (t, fn) in (("coef", mkZeros), ("pvalue", mkOnes), ("tscore", mkZeros))
@@ -40,15 +40,15 @@ function calcCoefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
     ret
   end
 
-  for (ix, edge) = enumerate(edges)
-    if all(df[edge] .== 0.)
+  for (ix, predictor) = enumerate(predictors)
+    if all(df[predictor] .== 0.)
       continue
     end
-    fm_str = "$target ~ $edge"
+    fm_str = "$target ~ $predictor"
     if !isempty(covars)
       fm_str = string(fm_str, " + ", join(covars, " + "))
     end
-    
+
     fm = eval(parse(fm_str))
     ct = coeftable(lm(fm, df))
     coefs[ix], tscores[ix], pvalues[ix] = ct.mat[2, [1, 3, 4]]
@@ -60,11 +60,25 @@ function calcCoefs(df::DataFrame, target::Symbol, edges::Vector{Symbol},
       @update_covar :pvalue c_p
     end
 
-    cors[ix] = cor(df[edge], df[target])
+    cors[ix] = cor(df[predictor], df[target])
   end
 
-  ret = DataFrame(coef=coefs, pvalue=pvalues, tscore=tscores, edge=edges, cor_coef=cors)
-  ret[:pvalue_adj] = padjust(ret[:pvalue], BenjaminiHochberg)
+  left_p_values, right_p_values = begin
+    one_sided_pvalues = pvalues./2
+    most_area_pvalues = 1 - one_sided_pvalues
+    take_left = tscores .< 0
+    take_right = !take_left
+    (take_left .* one_sided_pvalues + take_right .* most_area_pvalues,
+    take_right .* one_sided_pvalues + take_left .* most_area_pvalues)
+  end
+
+  ret = DataFrame(coef=coefs, pvalue=pvalues,
+    pvalue_left=left_p_values, pvalue_right=right_p_values,
+    tscore=tscores, predictor=predictors, cor_coef=cors)
+
+  for p::Symbol in (:pvalue, :pvalue_left, :pvalue_right)
+    ret[symbol(p, "_adj")] = padjust(ret[p], BenjaminiHochberg)
+  end
 
   for c in keys(covar_dt)
     ret[c] = covar_dt[c]

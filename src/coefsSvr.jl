@@ -58,24 +58,10 @@ function calcCoefs(d::DataInfo,
 
   test_scores::Vector{Float64} = cross_validate(fit, test, num_samples, cvg)
 
-  typealias HtInfo Dict{Symbol, Float64}
-  ht_info(arr::Vector{Float64}) = begin
-    ret = Dict{Symbol, Float64}()
-    ht = OneSampleTTest(arr)
-
-    for tail in [:right, :left, :both]
-      p_sym = symbol(tail, :_p)
-      ret[p_sym] = pvalue(ht, tail=tail)
-    end
-
-    ret[:t] = ht.t
-    ret
-  end
-
   pv(arr::Vector{Float64}, tail::Symbol=:both) = pvalue(OneSampleTTest(arr), tail=tail)
 
   prediction_info::DataFrame = begin
-    ht = ht_info(test_scores)
+    ht = htInfo(test_scores)
     DataFrame(
       mean=mean(test_scores),
       std=std(test_scores),
@@ -149,4 +135,3 @@ function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, DataFrame
     end
   end
 end
-
