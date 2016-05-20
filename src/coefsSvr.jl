@@ -10,6 +10,49 @@ include("svrBase.jl")
 include("ensembleSvr.jl")
 
 
+function compareCoefs(coefs1::DataFrame, coefs2::DataFrame,
+  name1::Symbol, name2::Symbol)
+
+  name_coefs_map = Dict(name1 => coefs1, name2 => coefs2)
+
+  predictors = names(coefs1)
+  @assert predictors == names(coefs2)
+
+  function calcCol(predictor::Symbol)
+    cols = DataFrame()
+    for fn in (mean, std)
+      for n in (name1, name2)
+        cols[symbol("$(n)_$(fn)")] = fn(name_coefs_map[n])
+      end
+    end
+
+    ht::HtInfo = htInfo(dropna(coefs1[predictor] - coefs2[predictor]))
+    for k::Symbol in keys(ht)
+      cols["$(name1)_vs_$(name2)_$k"] = i[k]
+    end
+
+    rows = stack(cols)
+    rename!(rows, Dict(variable => :measure, value => predictor)
+  end
+
+  ret = reduce(DataFrame(measure=Symbol[]), predictors) do acc::DataFrame, p::Symbol
+    join(acc, calcCol(p), on=:measure, kind=:outer)
+  end
+
+  for m::Symbol in ret[:measure]
+    is_p::Bool = endswith("$m", "_p")
+
+    if is_p
+      row_measure = symbol(m, :abj)
+      row_values = padjust(ret[:measure .== m, :][:], BenjaminiHochberg)
+      push!(ret, [row_measure; row_values])
+    end
+  end
+
+  ret
+end
+
+
 typealias IndicesLookup Array{Array{Int64}}
 
 function calcCoefs(get_ixs::Function,
@@ -76,30 +119,6 @@ function calcCoefs(get_ixs::Function,
       left_p=ht[:left_p],
       both_p=ht[:both_p],
       num_repetitions=num_repetitions)
-  end
-
-  predictor_info::DataFrame = begin
-    pr = DataFrame()
-    pr[symbol(d.dataset)] = predictors
-    pr[symbol(d.dataset, :_name)] = createPredictorNames(predictors, d.dataset)
-
-
-    pred_apply(fn::Function) = [fn(dropna(coefs[p])) for p in predictors]
-
-    pr[:mean] = pred_apply(mean)
-    pr[:std] = pred_apply(std)
-
-    hts::Vector{HtInfo} = pred_apply(htInfo)
-    for k::Symbol in keys(hts[1])
-      pr[k] = Float64[i[k] for i in hts]
-
-      is_p_measure::Bool = endswith(string(k), "_p")
-      if is_p_measure
-        pr[symbol(k, :_adj)]= padjust(pr[k], BenjaminiHochberg)
-      end
-    end
-
-    sort(pr, cols=:t)
   end
 
   Dict(symbol(d, :_predictors) => predictor_info,

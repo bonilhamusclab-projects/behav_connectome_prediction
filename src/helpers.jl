@@ -152,3 +152,6 @@ function htInfo(ht::HypothesisTests.HypothesisTest)
 end
 
 htInfo(arr::Vector{Float64}) = htInfo(OneSampleTTest(arr))
+
+#stricter than the 2-sample t-tests
+htInfo(arr1::Vector{Float64}, arr2::Vector{Float64}) = htInfo(arr1 - arr2)
