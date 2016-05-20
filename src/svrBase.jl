@@ -34,7 +34,7 @@ end
 end
 
 
-function learning_curve(svr::PyObject,
+function learningCurve(svr::PyObject,
                         lc_cvg_gen::Function,
                         o::Outcome,
                         dataset::DataSet,
@@ -46,7 +46,7 @@ function learning_curve(svr::PyObject,
   X, y = getXyMat(o, diff_wpm, dataset=dataset, region=region, subject_group=subject_group)
   num_samples::Int64 = length(y)
 
-  train_sizes::Vector{Int64} = ratios_to_counts(train_ratios, num_samples)
+  train_sizes::Vector{Int64} = ratiosToCounts(train_ratios, num_samples)
   train_sizes = train_sizes[train_sizes .> 2]
 
   ret::DataFrame = begin
@@ -86,7 +86,7 @@ function learning_curve(svr::PyObject,
 end
 
 
-function get_cvg_gen(cvgT::Type, n_folds::Int64)
+function getCvgGen(cvgT::Type, n_folds::Int64)
   @assert cvgT <: CrossValGenerator
   @switch cvgT begin
     Kfold; (n_samples::Int64) -> Kfold(n_samples, n_folds)
@@ -94,10 +94,10 @@ function get_cvg_gen(cvgT::Type, n_folds::Int64)
   end
 end
 
-get_cvg(cvgT::Type, n_folds::Int64, n_samples::Int64) = get_cvg_gen(cvgT, n_folds)(n_samples)
+getCvg(cvgT::Type, n_folds::Int64, n_samples::Int64) = getCvgGen(cvgT, n_folds)(n_samples)
 
 
-function learning_curve(o::Outcome;
+function learningCurve(o::Outcome;
                         dataset::DataSet=conn,
                         region::Region=left_select,
                         C=1.0,
@@ -107,19 +107,19 @@ function learning_curve(o::Outcome;
   isnull(seed) || srand(get(seed))
 
   svr = LinearSVR(C=C)
-  lc_cvg_gen = get_cvg_gen(RandomSub, 25)
-  learning_curve(svr, lc_cvg_gen, o, dataset, region, subject_group, train_ratios)
+  lc_cvg_gen = getCvgGen(RandomSub, 25)
+  learningCurve(svr, lc_cvg_gen, o, dataset, region, subject_group, train_ratios)
 end
 
 
-function learning_curve(di::DataInfo, C::Float64; seed::Nullable{Int}=Nullable(1234),
+function learningCurve(di::DataInfo, C::Float64; seed::Nullable{Int}=Nullable(1234),
                         train_ratios::AbstractVector{Float64}=1./6:1./6:1.)
-  learning_curve(di.outcome, region=di.region, C=C, subject_group=di.subject_group, seed=seed,
+  learningCurve(di.outcome, region=di.region, C=C, subject_group=di.subject_group, seed=seed,
                  train_ratios=train_ratios)
 end
 
 
-function lc_flip(di::DataInfo, C::Float64, flip_ratio::Float64)
+function lcFlip(di::DataInfo, C::Float64, flip_ratio::Float64)
   ret = DataFrame()
   for C_tmp = [C/flip_ratio, C, C*flip_ratio]
 
@@ -127,7 +127,7 @@ function lc_flip(di::DataInfo, C::Float64, flip_ratio::Float64)
       C_tmp > C ? symbol(k, "_gt") : symbol(k, "_lt") else
       k end
 
-    lc = learning_curve(di, C_tmp, train_ratios=5./6:1./6:1.)[end, :]
+    lc = learningCurve(di, C_tmp, train_ratios=5./6:1./6:1.)[end, :]
     ret[suff(:C)] = C_tmp
 
     for n in names(lc)
@@ -149,13 +149,48 @@ macro set_seed()
 end
 
 
-function ratios_to_counts(ratios::AbstractVector{Float64}, n::Int64)
+function ratiosToCounts(ratios::AbstractVector{Float64}, n::Int64)
   @assert all( (ratios .<= 1.) &  (ratios .>= 0.) )
 
-    get_count(r::Float64) = round(Int, r*n)::Int64
+  getCount(r::Float64) = round(Int, r*n)::Int64
 
-    map(get_count, ratios)
+  map(getCount, ratios)
 end
 
+ratioToCount(ratio::Float64, n::Int64) = ratiosToCounts([ratio], n)[1]
 
-ratio_to_count(ratio::Float64, n::Int64) = ratios_to_counts([ratio], n)[1]
+
+function getRepetitionSamplesGen(samples::AbstractVector,
+  n_repetitions::Int64,
+  is_perm::Bool)
+  n_samples::Int64 = length(samples)
+
+  typealias Inds Vector{Int64}
+  cached_perm_ixs::Array{Inds} = map(1:n_repetitions) do r
+    randperm(MersenneTwister(r), n_samples)
+  end
+
+  getPermInds(repetition_ix, train_size) =(
+    cached_perm_ixs[repetition_ix][1:train_size],
+    cached_perm_ixs[repetition_ix][train_size+1:end]
+  )
+
+  typealias TrainTest Tuple{Inds, Inds}
+  cvg::CrossValGenerator = getCvg(RandomSub, n_repetitions, n_samples)
+  cached_pure_ixs::Array{TrainTest} = map(cvg) do train_inds::Inds
+    train_inds, setdiff(1:n_samples, train_inds)
+  end
+
+  function fn(repetition_ix::Int64)
+    (X_train::Inds, X_test::Inds) = cached_pure_ixs[repetition_ix]
+    (y_train::Inds, y_test::Inds) = if is_perm
+      ret = getPermInds(repetition_ix, length(X_train))
+      #TODO: Figure out why this is necessary
+      ret
+    else
+      X_train, X_test
+    end
+
+    (samples[X_train], samples[y_train]), (samples[X_test], samples[y_test])
+  end
+end

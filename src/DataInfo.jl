@@ -97,3 +97,24 @@ Base.isless(x::DataInfo, y::DataInfo) = begin
 end
 
 Base.show(io::IO, di::DataInfo) = print(io, to_string(di))
+
+@memoize function getIdIx(di::DataInfo, id::UTF8String)
+  full_ids = getFull(di)[:id]
+  ret::Vector{Int64} = find(full_ids .== id)
+  @assert length(ret) == 1
+  ret[1]
+end
+
+typealias Ids Vector{UTF8String}
+getIdIxs(di::DataInfo, ids::Ids) = map(
+  id -> getIdIx(di, id), ids)
+
+typealias XyIds Tuple{Ids, Ids}
+typealias TrainTestIds Tuple{XyIds, XyIds}
+function getIdIxs(di::DataInfo, ids::TrainTestIds)
+  get_ids(train_test, xy) = getIdIxs(di, ids[train_test][xy])
+  train_X, train_y = map(i -> get_ids(1, i), 1:2)
+  test_X, test_y = map(i -> get_ids(2, i), 1:2)
+
+  ((train_X, train_y), (test_X, test_y))
+end

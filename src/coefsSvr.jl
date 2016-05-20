@@ -7,20 +7,18 @@ using PValueAdjust
 include("DataInfo.jl")
 include("helpers.jl")
 include("svrBase.jl")
+include("ensembleSvr.jl")
 
 
-function calcCoefs(d::DataInfo,
-                    Cs::AbstractVector{Float64};
-                    seed::Nullable{Int}=Nullable(1234))
+typealias IndicesLookup Array{Array{Int64}}
 
-  isnull(seed) || srand(get(seed))
+function calcCoefs(get_ixs::Function,
+                  d::DataInfo,
+                  Cs::AbstractVector{Float64})
 
   X::Matrix{Float64}, y::Vector{Float64} = getXyMat(d)
 
-  num_samples::Int64 = length(y)
-  num_randomizations::Int64 = length(Cs)
-  svr = LinearSVR()
-  cvg::CrossValGenerator = get_cvg(RandomSub, num_randomizations, num_samples)
+  num_repetitions = length(Cs)
 
   predictors = getPredictors(d)
   n_predictors = length(predictors)
@@ -29,34 +27,42 @@ function calcCoefs(d::DataInfo,
     ret = DataFrame()
     for p in predictors
       ###Hack to keep it float64 while being NA
-      ret[p] = repmat([-Inf], num_randomizations)
+      ret[p] = repmat([-Inf], num_repetitions)
       ret[ret[p] .== -Inf, :] = NA
     end
     ret
   end
 
-  fit, test = begin
+  fitTest! = begin
+    svr = LinearSVR()
 
-    state = Dict(:fit_call => 0)
-
-    fit_fn(inds::Vector{Int64}) = begin
-      state[:fit_call] += 1
-      println(state[:fit_call])
-      svr[:C] = Cs[state[:fit_call]]
-      svr[:fit](X[inds, :], y[inds])
-      for (ix, c) in enumerate(svr[:coef_])
-        coefs[state[:fit_call], predictors[ix]] = c
+    function updateCoefs!(repetition_ix::Int64, coef_data::Vector{Float64})
+      for (ix, c) in enumerate(coef_data)
+        coefs[repetition_ix, predictors[ix]] = c
       end
-      svr
     end
 
-    test_fn(c::PyObject, inds::Vector{Int64}) =
-      r2Score(y[inds], c[:predict](X[inds, :]))
+    typealias XyIxs Tuple{Vector{Int64}, Vector{Int64}}
+    typealias TrainTestIxs Tuple{XyIxs, XyIxs}
 
-    (fit_fn, test_fn)
+    function fn(repetition_ix::Int64)
+      println(repetition_ix)
+
+      svr[:C] = Cs[repetition_ix]
+
+      ixs::TrainTestIxs = get_ixs(repetition_ix)
+
+      x_train_ixs, y_train_ixs = ixs[1]
+      svr[:fit](X[x_train_ixs, :], y[y_train_ixs])
+
+      updateCoefs!(repetition_ix, svr[:coef_])
+
+      x_test_ixs, y_test_ixs = ixs[2]
+      r2Score(y[y_test_ixs], svr[:predict](X[x_test_ixs, :]))
+    end
   end
 
-  test_scores::Vector{Float64} = cross_validate(fit, test, num_samples, cvg)
+  test_scores::Vector{Float64} = map(fitTest!, 1:num_repetitions)
 
   pv(arr::Vector{Float64}, tail::Symbol=:both) = pvalue(OneSampleTTest(arr), tail=tail)
 
@@ -69,7 +75,7 @@ function calcCoefs(d::DataInfo,
       right_p=ht[:right_p],
       left_p=ht[:left_p],
       both_p=ht[:both_p],
-      num_randomizations=num_randomizations)
+      num_repetitions=num_repetitions)
   end
 
   predictor_info::DataFrame = begin
@@ -83,7 +89,7 @@ function calcCoefs(d::DataInfo,
     pr[:mean] = pred_apply(mean)
     pr[:std] = pred_apply(std)
 
-    hts::Vector{HtInfo} = pred_apply(ht_info)
+    hts::Vector{HtInfo} = pred_apply(htInfo)
     for k::Symbol in keys(hts[1])
       pr[k] = Float64[i[k] for i in hts]
 
@@ -102,25 +108,17 @@ function calcCoefs(d::DataInfo,
 end
 
 
-function calcAllCoefs(cs::Dict{DataInfo, Array{Float64, 1}})
+function calcAllCoefs(di_state_map::Dict{DataInfo, State})
 
   ret = Dict{DataInfo, Dict{Symbol, DataFrame}}()
-  for (di::DataInfo, Cs::AbstractVector{Float64}) in cs
+  for (di::DataInfo, state::State) in di_state_map
     println(di)
-    ret[di] = calcCoefs(di, Cs)
+    ret[di] = calcCoefs(di, state.cs) do rep_ix::Int64
+      getIdIxs(di, state.getids(rep_ix))
+    end
   end
 
   ret
-
-end
-
-
-function calcLesionCoefs()
-  mkDi(o::Outcome, r::Region) = DataInfo(o, diff_wpm, all_subjects, r, lesion)
-  regions::Vector{Region} = Region[left_select, left, full_brain]
-  cs::Dict{DataInfo, Float64} = [mkDi(o, r) => 10. for r in regions,
-                                 o in Outcome[adw, atw]]
-  calcAllCoefs(cs)
 end
 
 
