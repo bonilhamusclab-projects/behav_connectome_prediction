@@ -32,7 +32,7 @@ function compareCoefs(coefs1::DataFrame, coefs2::DataFrame,
     end
 
     rows = stack(cols)
-    rename!(rows, Dict(variable => :measure, value => predictor)
+    rename!(rows, Dict(variable => :measure, value => predictor))
   end
 
   ret = reduce(DataFrame(measure=Symbol[]), predictors) do acc::DataFrame, p::Symbol
