@@ -10,46 +10,80 @@ include("svrBase.jl")
 include("ensembleSvr.jl")
 
 
-function compareCoefs(coefs1::DataFrame, coefs2::DataFrame,
-  name1::Symbol, name2::Symbol)
-
-  name_coefs_map = Dict(name1 => coefs1, name2 => coefs2)
-
-  predictors = names(coefs1)
-  @assert predictors == names(coefs2)
-
-  function calcCol(predictor::Symbol)
-    cols = DataFrame()
-    for fn in (mean, std)
-      for n in (name1, name2)
-        cols[symbol("$(n)_$(fn)")] = fn(name_coefs_map[n])
-      end
+function compareVectors{T <: AbstractVector{Float64}}(real::T, perm::T; ret::DataFrame=DataFrame())
+  for fn in (mean, std)
+    for (n, arr) in ((:real, real), (:perm, perm))
+      ret[symbol("$(n)_$(fn)")] = [fn(arr)]
     end
-
-    ht::HtInfo = htInfo(dropna(coefs1[predictor] - coefs2[predictor]))
-    for k::Symbol in keys(ht)
-      cols["$(name1)_vs_$(name2)_$k"] = i[k]
-    end
-
-    rows = stack(cols)
-    rename!(rows, Dict(variable => :measure, value => predictor))
   end
 
-  ret = reduce(DataFrame(measure=Symbol[]), predictors) do acc::DataFrame, p::Symbol
-    join(acc, calcCol(p), on=:measure, kind=:outer)
+  diff_vec::AbstractVector{Float64} = isa(real, DataArray) ? dropna(real - perm) : real - perm
+  ht::HtInfo = htInfo(diff_vec)
+  for k::Symbol in keys(ht)
+    ret[symbol("real_vs_perm_", k)] = [ht[k]]
   end
 
-  for m::Symbol in ret[:measure]
+  ret
+end
+
+
+function compareCoefs(real_coefs::DataFrame, perm_coefs::DataFrame)
+
+  name_coefs_map = Dict(:real => real_coefs, :perm => perm_coefs)
+
+  predictors = names(real_coefs)
+  @assert predictors == names(perm_coefs)
+
+  calcRow(predictor::Symbol) = compareVectors(real_coefs[predictor], 
+                                              perm_coefs[predictor], 
+                                              ret=DataFrame(predictor=[predictor]))
+
+  ret::DataFrame = vcat(map(calcRow, predictors)...)
+
+  for m::Symbol in names(ret)
     is_p::Bool = endswith("$m", "_p")
 
     if is_p
-      row_measure = symbol(m, :abj)
-      row_values = padjust(ret[:measure .== m, :][:], BenjaminiHochberg)
-      push!(ret, [row_measure; row_values])
+      adj_measure = symbol(m, :adj)
+      ret[adj_measure] = padjust(ret[m], BenjaminiHochberg)
     end
   end
 
   ret
+end
+
+
+compareCoefs(real_coefs::AbstractString, perm_coefs::AbstractString) = compareCoefs(
+  readtable(real_coefs), readtable(perm_coefs))
+
+
+@enum CompareType coefs scores
+function _saveCompareRes(compares::DataFrame, suffix::AbstractString, compare_type::CompareType)
+  dir = joinpath("$(data_dir())/step5/svr/")
+  isdir(dir) || mkpath(dir)
+  
+  f_name = "real_vs_perm_$(compare_type)_$(suffix).csv"
+  println(f_name)
+
+  full_path = joinpath(dir, f_name)
+  writetable(full_path, compares)
+end
+
+
+function saveCompareCoefs(coefCompares::DataFrame, suffix::AbstractString)
+  _saveCompareRes(coefCompares, suffix, coefs)
+end
+
+
+compareScores(real_scores, perm_scores) = compareVectors(real_scores, perm_scores)
+
+function compareScores(real_scores::AbstractString, perm_scores::AbstractString) 
+  compareVectors(readdlm(real_scores)[:], readdlm(perm_scores)[:])
+end
+
+
+function saveCompareScores(scoreCompares::DataFrame, suffix::AbstractString)
+  _saveCompareRes(scoreCompares, suffix, scores)
 end
 
 
@@ -105,31 +139,17 @@ function calcCoefs(get_ixs::Function,
     end
   end
 
-  test_scores::Vector{Float64} = map(fitTest!, 1:num_repetitions)
+  scores::Vector{Float64} = map(fitTest!, 1:num_repetitions)
 
-  pv(arr::Vector{Float64}, tail::Symbol=:both) = pvalue(OneSampleTTest(arr), tail=tail)
-
-  prediction_info::DataFrame = begin
-    ht = htInfo(test_scores)
-    DataFrame(
-      mean=mean(test_scores),
-      std=std(test_scores),
-      t=ht[:t],
-      right_p=ht[:right_p],
-      left_p=ht[:left_p],
-      both_p=ht[:both_p],
-      num_repetitions=num_repetitions)
-  end
-
-  Dict(symbol(d, :_predictors) => predictor_info,
-       symbol(d, :_predictions) => prediction_info)
+  Dict(symbol(d, :_coefs) => coefs,
+       symbol(d, :_scores) => scores)
 
 end
 
 
 function calcAllCoefs(di_state_map::Dict{DataInfo, State})
 
-  ret = Dict{DataInfo, Dict{Symbol, DataFrame}}()
+  ret = Dict{DataInfo, Dict{Symbol, Union{DataFrame, Vector{Float64}}}}()
   for (di::DataInfo, state::State) in di_state_map
     println(di)
     ret[di] = calcCoefs(di, state.cs) do rep_ix::Int64
@@ -141,14 +161,18 @@ function calcAllCoefs(di_state_map::Dict{DataInfo, State})
 end
 
 
-function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, DataFrame}})
+function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, Union{DataFrame, Vector{Float64}}}}, 
+                       prefix::AbstractString)
   for di::DataInfo in keys(calc_all_coefs_ret)
     dir = joinpath("$(data_dir())/step4/svr/")
     isdir(dir) || mkpath(dir)
-    for (k::Symbol, data::DataFrame) in calc_all_coefs_ret[di]
-      f_name = "$k.csv"
+    for (k::Symbol, data::Union{Vector{Float64}, DataFrame}) in calc_all_coefs_ret[di]
+      f_name = "$(prefix)_$k.csv"
       println(f_name)
-      writetable(joinpath(dir, f_name), data)
+      full_path = joinpath(dir, f_name)
+
+      write_fn = isa(data, DataFrame) ? writetable : writecsv
+      write_fn(full_path, data)
     end
   end
 end
