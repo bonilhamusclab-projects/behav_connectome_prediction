@@ -34,8 +34,8 @@ function compareCoefs(real_coefs::DataFrame, perm_coefs::DataFrame)
   predictors = names(real_coefs)
   @assert predictors == names(perm_coefs)
 
-  calcRow(predictor::Symbol) = compareVectors(real_coefs[predictor], 
-                                              perm_coefs[predictor], 
+  calcRow(predictor::Symbol) = compareVectors(real_coefs[predictor],
+                                              perm_coefs[predictor],
                                               ret=DataFrame(predictor=[predictor]))
 
   ret::DataFrame = vcat(map(calcRow, predictors)...)
@@ -45,7 +45,7 @@ function compareCoefs(real_coefs::DataFrame, perm_coefs::DataFrame)
 
     if is_p
       adj_measure = symbol(m, :adj)
-      ret[adj_measure] = padjust(ret[m], BenjaminiHochberg)
+      ret[adj_measure] = padjust(ret[m], Bonferroni)
     end
   end
 
@@ -61,7 +61,7 @@ compareCoefs(real_coefs::AbstractString, perm_coefs::AbstractString) = compareCo
 function _saveCompareRes(compares::DataFrame, suffix::AbstractString, compare_type::CompareType)
   dir = joinpath("$(data_dir())/step5/svr/")
   isdir(dir) || mkpath(dir)
-  
+
   f_name = "real_vs_perm_$(compare_type)_$(suffix).csv"
   println(f_name)
 
@@ -77,7 +77,7 @@ end
 
 compareScores(real_scores, perm_scores) = compareVectors(real_scores, perm_scores)
 
-function compareScores(real_scores::AbstractString, perm_scores::AbstractString) 
+function compareScores(real_scores::AbstractString, perm_scores::AbstractString)
   compareVectors(readdlm(real_scores)[:], readdlm(perm_scores)[:])
 end
 
@@ -161,7 +161,7 @@ function calcAllCoefs(di_state_map::Dict{DataInfo, State})
 end
 
 
-function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, Union{DataFrame, Vector{Float64}}}}, 
+function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, Union{DataFrame, Vector{Float64}}}},
                        prefix::AbstractString)
   for di::DataInfo in keys(calc_all_coefs_ret)
     dir = joinpath("$(data_dir())/step4/svr/")
