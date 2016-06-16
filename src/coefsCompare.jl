@@ -57,7 +57,7 @@ function compare(
 
 end
 
-compare_svr(lr_df::DataFrame, svr_df::DataFrame) = compare(
+compareSvr(lr_df::DataFrame, svr_df::DataFrame) = compare(
     lr_df, svr_df,
     old_lr_predictor=:edge, old_svr_predictor=:conn,
     new_predictor=:edge
