@@ -29,9 +29,7 @@ def valid_id(id_str):
 
 
 def read_excel_data(src_file, column_mappings):
-    excel = pd.read_excel(src_file, 'Data')
-
-    data = excel[column_mappings.keys()]
+    data = pd.read_excel(src_file, 'Data')
 
     data.rename(columns=column_mappings, inplace=True)
 
@@ -93,6 +91,8 @@ def convert_excel_meta(src_file, dest_dir='data/step2'):
     }
 
     data = read_excel_data(src_file, column_mappings).dropna()
+    
+    data = data.loc[data['Stroke Hemisphere'] == 'left', column_mappings.values()]
 
     ##Neded b/c age at test is important, not current day
     dot = [_date_of_test_parser(d) for d in data['dot']]
@@ -136,6 +136,8 @@ def convert_excel(src_file, dest_dir='data/step2/'):
     }
 
     data = read_excel_data(src_file, column_mappings)
+
+    data = data.loc[data['Stroke Hemisphere'] == 'left', column_mappings.values()]
 
     def float_or_nan(val):
         try:
