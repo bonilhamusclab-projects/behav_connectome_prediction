@@ -57,10 +57,17 @@ compareCoefs(real_coefs::AbstractString, perm_coefs::AbstractString) = compareCo
   readtable(real_coefs), readtable(perm_coefs))
 
 
+function getDataDir!(d...)
+  d_path = joinpath(d...)
+  dir = joinpath(data_dir(), d_path)
+  isdir(dir) || mkpath(dir)
+  dir
+end
+
+
 @enum CompareType coefs scores
 function _saveCompareRes(compares::DataFrame, suffix::AbstractString, compare_type::CompareType)
-  dir = joinpath("$(data_dir())/step5/svr/")
-  isdir(dir) || mkpath(dir)
+  dir = getDataDir!("step5", "svr")
 
   f_name = "real_vs_perm_$(compare_type)_$(suffix).csv"
   println(f_name)
@@ -164,8 +171,7 @@ end
 function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, Union{DataFrame, Vector{Float64}}}},
                        prefix::AbstractString)
   for di::DataInfo in keys(calc_all_coefs_ret)
-    dir = joinpath("$(data_dir())/step4/svr/")
-    isdir(dir) || mkpath(dir)
+    dir = getDataDir!("step4", "svr")
     for (k::Symbol, data::Union{Vector{Float64}, DataFrame}) in calc_all_coefs_ret[di]
       f_name = "$(prefix)_$k.csv"
       println(f_name)
@@ -175,4 +181,24 @@ function saveCalcCoefs(calc_all_coefs_ret::Dict{DataInfo, Dict{Symbol, Union{Dat
       write_fn(full_path, data)
     end
   end
+end
+
+
+function saveCs(di_state_map::Dict{DataInfo, State}, prefix::AbstractString)
+  for (di::DataInfo, s::State) in di_state_map
+    saveStep4Array(s.cs, "$(prefix)_$(di)_cs")
+  end
+end
+
+
+#Does not recalculate the coefficients
+savePredScores(scores::AbstractArray{Float64},
+              prefix::AbstractString) = saveStep4Array(scores,
+  "$(prefix)_scores")
+
+
+function saveStep4Array(arr::AbstractArray{Float64}, f_name)
+  dir = getDataDir!("step4", "svr")
+  full_path = joinpath(dir, "$(f_name).csv")
+  writecsv(full_path, arr)
 end

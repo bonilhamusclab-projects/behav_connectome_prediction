@@ -99,12 +99,16 @@ function simpleNewton(fn::Function, y::Float64,
     _recursion_state.best_x = mid_x
   end
 
-  if curr_diff < min_delta_ratio || _recursion_state.current_iter >= n_iters
+  max_x::Float64, min_x::Float64 = y_guess > y ? (mid_x, min_x) : (max_x, mid_x)
+
+  newton_done = curr_diff < min_delta_ratio ||
+    _recursion_state.current_iter >= n_iters ||
+    max_x <= min_x
+
+  if newton_done
     debug("newton done")
     return _recursion_state.best_x
   end
-
-  max_x::Float64, min_x::Float64 = y_guess > y ? (mid_x, min_x) : (max_x, mid_x)
 
   simpleNewton(fn, y, min_x, max_x, min_delta_ratio=min_delta_ratio,
                 _recursion_state=_recursion_state)
