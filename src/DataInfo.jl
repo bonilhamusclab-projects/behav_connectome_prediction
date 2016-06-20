@@ -98,7 +98,7 @@ end
 
 Base.show(io::IO, di::DataInfo) = print(io, to_string(di))
 
-@memoize function getIdIx(di::DataInfo, id::UTF8String)
+@memoize function getIdIx(di::DataInfo, id::AbstractString)
   full_ids = getFull(di)[:id]
   ret::Vector{Int64} = find(full_ids .== id)
   @assert length(ret) == 1
