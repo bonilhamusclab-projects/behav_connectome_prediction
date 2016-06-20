@@ -54,7 +54,7 @@ function calcScoresGen(ixs::AbstractVector{Int64},
   X::Matrix{Float64}, y::Vector{Float64} = begin
     Xy::XY = getXyMat(o, diff_wpm,
                       dataset=dataset,
-                      region=left_select,
+                      region=left_select2,
                       subject_group=all_subjects)
     Xy[1][ixs, :], Xy[2][ixs]
   end
@@ -181,7 +181,7 @@ typealias DataSetMap Dict{DataSet, Float64}
 
 function ensemble(outcome::Outcome,
                   get_C::Function,
-                  region::Region=left_select;
+                  region::Region=left_select2;
                   weights::DataSetMap = Dict(conn => .5, lesion => .5),
                   n_repetitions::Int64=1000,
                   seed::Nullable{Int}=Nullable(1234),
@@ -207,7 +207,6 @@ function ensemble(outcome::Outcome,
   end
 
 
-  typealias Ids AbstractVector{UTF8String}
   common_ids::Ids = begin
     ids::Dict{DataSet, Ids} = allDs(Ids) do d
       getFull(dis[d])[:id]
@@ -353,7 +352,7 @@ function run(n_repetitions::Int64=1000, is_perm=false)
   ret[:preds] = Dict(:55 => pred_55, :conn => pred_conn, :lesion => pred_lesion)
   ret[:state] = state_map
 
-  mkDi(ds::DataSet) = DataInfo(adw, diff_wpm, all_subjects, left_select, ds)
+  mkDi(ds::DataSet) = DataInfo(adw, diff_wpm, all_subjects, left_select2, ds)
   ret[:state][mkDi(conn)].getids = get_ids_conn
   ret[:state][mkDi(lesion)].getids = get_ids_lesion
 

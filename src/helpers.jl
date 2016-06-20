@@ -7,7 +7,7 @@ using Memoize
 
 @enum Target diff_wpm se
 
-@enum Region full_brain left left_select
+@enum Region full_brain left left_select left_select2
 
 @enum SubjectGroup all_subjects improved poor_pd poor_pd_1
 
@@ -19,6 +19,7 @@ using Memoize
   end
 
   names = @switch region begin
+    left_select2; jhu_left_select_names2();
     left_select; jhu_left_select_names();
     left; jhu_left_names();
     full_brain; jhu_names();
@@ -34,6 +35,8 @@ end
 
 @memoize isLeftSelectEdge(edge_col::Symbol) = isEdge(edge_col, left_select)
 
+@memoize isLeftSelect2Edge(edge_col::Symbol) = isEdge(edge_col, left_select2)
+
 
 @memoize isRoi(col::Symbol, names=jhu_names()) = in(col, names)
 
@@ -41,6 +44,9 @@ end
 
 @memoize isLeftSelectRoi(col::Symbol) = isRoi(
   col, jhu_left_select_names())
+
+@memoize isLeftSelect2Roi(col::Symbol) = isRoi(
+  col, jhu_left_select_names2())
 
 
 @memoize function regionFilter(r::Region, d::DataSet, predictors::Vector{Symbol})
@@ -73,13 +79,16 @@ data_dir() = joinpath(dirname(pwd()), "data")
 namesSet(df_fn::Function) = @>> df_fn()[:name] Set map(symbol)
 
 @memoize jhu() = readtable("$(data_dir())/jhu_coords.csv")
-@memoize jhu_names() = @> jhu namesSet
+@memoize jhu_names() = jhu |> namesSet
 
 @memoize jhu_left() = readtable("$(data_dir())/jhu_rois_left.csv")
-@memoize jhu_left_names() = @> jhu_left namesSet
+@memoize jhu_left_names() = jhu_left |> namesSet
 
 @memoize jhu_left_select() = readtable("$(data_dir())/jhu_rois_left_adjusted.csv")
-@memoize jhu_left_select_names() = @> jhu_left_select namesSet
+@memoize jhu_left_select_names() = jhu_left_select |> namesSet
+
+@memoize jhu_left_select2() = readtable("$(data_dir())/jhu_rois_left_adjusted2.csv")
+@memoize jhu_left_select_names2() = jhu_left_select2 |> namesSet
 
 
 @memoize edgeColToRoiNames(edge::Symbol) = @>> split("$edge", "_to_") map(symbol)

@@ -105,7 +105,7 @@ Base.show(io::IO, di::DataInfo) = print(io, to_string(di))
   ret[1]
 end
 
-typealias Ids Vector{UTF8String}
+typealias Ids{T <: AbstractString} AbstractVector{T}
 getIdIxs(di::DataInfo, ids::Ids) = map(
   id -> getIdIx(di, id), ids)
 
