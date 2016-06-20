@@ -1,6 +1,6 @@
 using Base.Test
 
-include("testUtls.jl")
+include("testUtils.jl")
 
 @data_include("DataInfo.jl")
 @data_include("helpers.jl")

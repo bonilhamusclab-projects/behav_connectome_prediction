@@ -2,7 +2,7 @@ using Base.Test
 using MLBase
 using PyCall
 
-include("testUtls.jl")
+include("testUtils.jl")
 
 @data_include("svrBase.jl")
 
