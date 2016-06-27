@@ -2,16 +2,16 @@ using DataFrames
 using Memoize
 
 
-load_roi_names() = Vector{Symbol}(map(symbol, readtable("data/jhu_coords.csv")[:name]))
+loadRoiNames() = Vector{Symbol}(map(symbol, readtable("data/jhu_coords.csv")[:name]))
 
 
-@memoize get_roi_ix(roi::Symbol) = findfirst(e -> e == roi, load_roi_names())
+@memoize getRoiIx(roi::Symbol) = findfirst(e -> e == roi, loadRoiNames())
 
 
-get_id(csv_path::AbstractString) = basename(csv_path)[1:end-4]
+getId(csv_path::AbstractString) = basename(csv_path)[1:end-4]
 
 
-function load_conn_csv(csv_path, rois=load_roi_names())
+function loadConnCsv(csv_path, rois=loadRoiNames())
   roi_x_roi = readtable(csv_path, header=false, names=rois)
 
   num_rois = length(rois)
@@ -20,8 +20,8 @@ function load_conn_csv(csv_path, rois=load_roi_names())
 
   roi_x_roi[:left] = rois
   roi_long = rename!(melt(roi_x_roi, :left), :variable, :right)
-  roi_long[:left_ix] = map(get_roi_ix, roi_long[:left])
-  roi_long[:right_ix] = map(get_roi_ix, roi_long[:right])
+  roi_long[:left_ix] = map(getRoiIx, roi_long[:left])
+  roi_long[:right_ix] = map(getRoiIx, roi_long[:right])
 
   roi_long = roi_long[roi_long[:left_ix] .> roi_long[:right_ix], [:left, :right, :value]]
   conn_names::Vector{Symbol} = map(eachrow(roi_long)) do r
@@ -30,17 +30,17 @@ function load_conn_csv(csv_path, rois=load_roi_names())
   conn_values = Any[[v] for v in roi_long[:value]]
 
   ret = DataFrame(conn_values, conn_names)
-  ret[:id] = get_id(csv_path)
+  ret[:id] = getId(csv_path)
   ret
 end
 
 
-function load_lesion_csv(csv_path, rois=load_roi_names())
+function loadLesionCsv(csv_path, rois=loadRoiNames())
   data::Vector{Any} = Any[[i] for i in readcsv(csv_path)]
   @assert length(rois) == length(data)
 
   ret = DataFrame(data, rois)
-  ret[:id] = get_id(csv_path)
+  ret[:id] = getId(csv_path)
   ret
 end
 
@@ -48,7 +48,7 @@ end
 typealias OptDir Nullable{ASCIIString}
 
 
-function consolidate_x(load_fn::Function,
+function consolidateX(load_fn::Function,
                        csv_dir::AbstractString;
                        dest_dir::OptDir = OptDir())
   fs = readdir(csv_dir)
@@ -73,27 +73,27 @@ function consolidate_x(load_fn::Function,
 end
 
 
-function consolidate_conn_x(csv_dir="data/step1/conn";
+function consolidateConnX(csv_dir="data/step1/conn";
                             dest_dir::OptDir=OptDir())
   println("conn")
-  rois = load_roi_names()
+  rois = loadRoiNames()
 
-  consolidate_x(csv_dir, dest_dir=dest_dir) do csv_path
-    load_conn_csv(csv_path, rois)
+  consolidateX(csv_dir, dest_dir=dest_dir) do csv_path
+    loadConnCsv(csv_path, rois)
   end
 end
 
 
-function consolidate_lesion_x(csv_dir="data/step1/lesion";
+function consolidateLesionX(csv_dir="data/step1/lesion";
                               dest_dir::OptDir=OptDir())
   println("lesion")
-  rois::Vector{Symbol} = load_roi_names()
+  rois::Vector{Symbol} = loadRoiNames()
 
-  consolidate_x(load_lesion_csv, csv_dir, dest_dir=dest_dir)
+  consolidateX(loadLesionCsv, csv_dir, dest_dir=dest_dir)
 end
 
 
-function consolidate_x_with_y(consolidated_x::DataFrame,
+function consolidateXwithY(consolidated_x::DataFrame,
                               y_dir="data/step2/";
                               dest_dir::OptDir=OptDir())
 
@@ -130,13 +130,13 @@ function consolidate_x_with_y(consolidated_x::DataFrame,
 end
 
 
-function run_all()
+function runAll()
   lesion_dir = "data/step3/lesion"
   conn_dir = "data/step3/conn"
 
-  X_lesion = consolidate_lesion_x(dest_dir=OptDir(lesion_dir))
-  consolidate_x_with_y(X_lesion, dest_dir=OptDir(lesion_dir))
+  X_lesion = consolidateLesionX(dest_dir=OptDir(lesion_dir))
+  consolidateXwithY(X_lesion, dest_dir=OptDir(lesion_dir))
 
-  X_conn = consolidate_conn_x(dest_dir=OptDir(conn_dir))
-  consolidate_x_with_y(X_conn, dest_dir=OptDir(conn_dir))
+  X_conn = consolidateConnX(dest_dir=OptDir(conn_dir))
+  consolidateXwithY(X_conn, dest_dir=OptDir(conn_dir))
 end
