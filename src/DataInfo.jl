@@ -35,20 +35,34 @@ getData(d::DataInfo) = begin
 end
 
 
+typealias Ids{T <: AbstractString} AbstractVector{T}
+getIdIxs(di::DataInfo, ids::Ids) = map(
+  id -> getIdIx(di, id), ids)
+
+
 typealias XY Tuple{Matrix{Float64}, Vector{Float64}}
-getXyMat(d::DataInfo) = begin
+function getXyMat(di::DataInfo, ids::Ids)
   data::DataFrame, predictors::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
-    getData(d)
+    getData(di)
+
+  ixs = getIdIxs(di, ids)
 
   X::Matrix{Float64} = begin
     x_cols::Vector{Symbol} = [predictors; covars]
-    Matrix(data[:, predictors])
+    Matrix(data[ixs, predictors])
   end
 
-  y::Vector{Float64} = Array(data[:, target_col])
+  y::Vector{Float64} = Array(data[ixs, target_col])
 
   X, y
 end
+
+
+function getXyMat(di::DataInfo)
+  f = getFull(di)
+  getXyMat(di, f[:id])
+end
+
 
 to_string(d::DataInfo) = join(
   ["$(d.outcome)_$(d.subject_group)_$(d.region)_$(d.target)_$(d.dataset)"; getCovars(d)],
@@ -105,10 +119,6 @@ Base.show(io::IO, di::DataInfo) = print(io, to_string(di))
   ret[1]
 end
 
-typealias Ids{T <: AbstractString} AbstractVector{T}
-getIdIxs(di::DataInfo, ids::Ids) = map(
-  id -> getIdIx(di, id), ids)
-
 typealias XyIds Tuple{Ids, Ids}
 typealias TrainTestIds Tuple{XyIds, XyIds}
 function getIdIxs(di::DataInfo, ids::TrainTestIds)
@@ -118,3 +128,7 @@ function getIdIxs(di::DataInfo, ids::TrainTestIds)
 
   ((train_X, train_y), (test_X, test_y))
 end
+
+
+getCommonIds(dis::AbstractVector{DataInfo}) = intersect(
+  [ASCIIString[i for i in getFull(di)[:id]] for di in dis]...)

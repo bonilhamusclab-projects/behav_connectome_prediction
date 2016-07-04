@@ -94,17 +94,17 @@ function saveCompareScores(scoreCompares::DataFrame, suffix::AbstractString)
 end
 
 
-typealias IndicesLookup Array{Array{Int64}}
-
-function calcCoefs(get_ixs::Function,
-                  d::DataInfo,
+function calcCoefs(di::DataInfo,
+                  getixs::Function,
+                  ids::Ids,
                   Cs::AbstractVector{Float64})
 
-  X::Matrix{Float64}, y::Vector{Float64} = getXyMat(d)
+  X::Matrix{Float64}, y::Vector{Float64} = getXyMat(di, ids)
+  pipe = svrPipelineGen(X, y)
 
   num_repetitions = length(Cs)
 
-  predictors = getPredictors(d)
+  predictors = getPredictors(di)
   n_predictors = length(predictors)
 
   coefs::DataFrame = begin
@@ -118,8 +118,6 @@ function calcCoefs(get_ixs::Function,
   end
 
   fitTest! = begin
-    svr = LinearSVR()
-
     function updateCoefs!(repetition_ix::Int64, coef_data::Vector{Float64})
       for (ix, c) in enumerate(coef_data)
         coefs[repetition_ix, predictors[ix]] = c
@@ -132,17 +130,17 @@ function calcCoefs(get_ixs::Function,
     function fn(repetition_ix::Int64)
       println(repetition_ix)
 
-      svr[:C] = Cs[repetition_ix]
+      paramState(pipe, :svr)[:C] = Cs[repetition_ix]
 
-      ixs::TrainTestIxs = get_ixs(repetition_ix)
+      ixs::TrainTestIxs = getixs(repetition_ix)
 
       x_train_ixs, y_train_ixs = ixs[1]
-      svr[:fit](X[x_train_ixs, :], y[y_train_ixs])
+      pipeFit!(pipe, x_train_ixs, y_train_ixs)
 
-      updateCoefs!(repetition_ix, svr[:coef_])
+      updateCoefs!(repetition_ix, paramState(pipe, :svr)[:coef_])
 
       x_test_ixs, y_test_ixs = ixs[2]
-      r2Score(y[y_test_ixs], svr[:predict](X[x_test_ixs, :]))
+      pipeTest(pipe, x_test_ixs)
     end
   end
 
@@ -159,9 +157,7 @@ function calcAllCoefs(di_state_map::Dict{DataInfo, State})
   ret = Dict{DataInfo, Dict{Symbol, Union{DataFrame, Vector{Float64}}}}()
   for (di::DataInfo, state::State) in di_state_map
     println(di)
-    ret[di] = calcCoefs(di, state.cs) do rep_ix::Int64
-      getIdIxs(di, state.getids(rep_ix))
-    end
+    ret[di] = calcCoefs(di, state.getrepixs, state.ids, state.cs)
   end
 
   ret

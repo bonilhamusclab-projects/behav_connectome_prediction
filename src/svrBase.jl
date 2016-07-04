@@ -6,23 +6,10 @@ using PyCall
 
 include("DataInfo.jl")
 include("helpers.jl")
+include("mlHelpers.jl")
 
 @pyimport sklearn.svm as svm
 LinearSVR = svm.LinearSVR
-
-
-macro l2_from_true(x)
-  :(sum( (y_true - $x).^2))
-end
-
-
-function r2Score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T})
-
-  numerator::Float64 = @l2_from_true y_pred
-  denominator::Float64 = @l2_from_true mean(y_true)
-
-  1 - numerator/denominator
-end
 
 
 @memoize function getXyMat(o::Outcome,
@@ -160,9 +147,18 @@ end
 ratioToCount(ratio::Float64, n::Int64) = ratiosToCounts([ratio], n)[1]
 
 
+function getRepetitionSamplesGen(n_samples::Int64,
+  n_repetitions::Int64,
+  is_perm::Bool)
+
+  getRepetitionSamplesGen(1:n_samples, n_repetitions, is_perm)
+end
+
+
 function getRepetitionSamplesGen(samples::AbstractVector,
   n_repetitions::Int64,
   is_perm::Bool)
+
   n_samples::Int64 = length(samples)
 
   typealias Inds Vector{Int64}
@@ -193,4 +189,73 @@ function getRepetitionSamplesGen(samples::AbstractVector,
 
     (samples[X_train], samples[y_train]), (samples[X_test], samples[y_test])
   end
+end
+
+
+function normalizeData(X::AbstractArray,
+  feature_mns::AbstractVector, feature_stds::AbstractVector)
+
+  @assert length(feature_mns) == length(feature_stds) == size(X, 2)
+
+  (X .- feature_mns')./feature_stds'
+end
+
+
+normalizeDataWithStateGen(state::Dict = Dict()) = Xy::XY -> begin
+  X, y = Xy
+
+  feature_means::AbstractVector = mean(X, 1)[:]
+  feature_stds::AbstractVector = std(X, 1)[:]
+
+  norm_X = normalizeData(X, feature_means, feature_stds)
+
+  state[:feature_means] = feature_means
+  state[:feature_stds] = feature_stds
+
+  norm_X, y
+end
+
+
+takeVariantColsGen(state::Dict) = Xy::XY -> begin
+  X, y = Xy
+  variantCols = state[:feature_stds] .> 1e-6
+
+  X[:, variantCols], y
+end
+
+
+function svrPipelineGen(X::Matrix, y::Vector)
+  svr = LinearSVR()
+
+  state = Dict{Symbol, Any}(:svr => svr)
+
+  selectData(ixs::IXs; y_ixs::IXs=ixs) = X[ixs, :], y[y_ixs]
+
+  takeVariantCols = takeVariantColsGen(state)
+
+  fit_fns::Functions = begin
+    ##Use if normalizing
+    normalizeData! = normalizeDataWithStateGen(state)
+    ##
+
+    svrFit!(Xy::XY) = svr[:fit](Xy[1], Xy[2])
+
+    [selectData, svrFit!]
+  end
+
+  predict_fns::Functions = begin
+    onlyX(Xy::XY) = Xy[1]
+    mockY(X::Matrix) = (X, Float64[])
+
+    ##Use if normalizing
+    nData(X::Matrix) = normalizeData(X, state[:feature_means], state[:feature_stds])
+    takeVariantColsX(X::Matrix) = X |> mockY |> takeVariantCols |> onlyX
+    ##
+
+    svrPredict(X::Matrix) = svr[:predict](X)
+
+    [selectData, onlyX, svrPredict]
+  end
+
+  Pipeline(fit_fns, predict_fns, r2score, y, state)
 end
