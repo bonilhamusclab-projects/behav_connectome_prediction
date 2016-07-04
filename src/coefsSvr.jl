@@ -146,8 +146,8 @@ function calcCoefs(di::DataInfo,
 
   scores::Vector{Float64} = map(fitTest!, 1:num_repetitions)
 
-  Dict(symbol(d, :_coefs) => coefs,
-       symbol(d, :_scores) => scores)
+  Dict(symbol(di, :_coefs) => coefs,
+       symbol(di, :_scores) => scores)
 
 end
 
