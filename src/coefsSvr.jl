@@ -152,12 +152,12 @@ function calcCoefs(di::DataInfo,
 end
 
 
-function calcAllCoefs(di_state_map::Dict{DataInfo, State})
+function calcAllCoefs(di_state_map::Dict{DataInfo, State}, ids, getrepixs)
 
   ret = Dict{DataInfo, Dict{Symbol, Union{DataFrame, Vector{Float64}}}}()
   for (di::DataInfo, state::State) in di_state_map
     println(di)
-    ret[di] = calcCoefs(di, state.getrepixs, state.ids, state.cs)
+    ret[di] = calcCoefs(di, getrepixs, ids, state.cs)
   end
 
   ret

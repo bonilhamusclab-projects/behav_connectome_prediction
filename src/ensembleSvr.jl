@@ -101,11 +101,13 @@ typealias DataSetMap Dict{DataSet, Float64}
 
 function ensemble(outcome::Outcome,
                   get_C::Function,
+                  ids::Ids,
+                  getRepetitionIxs::Function,
                   region::Region=left_select2;
                   weights::DataSetMap = Dict(conn => .5, lesion => .5),
                   n_repetitions::Int64=1000,
-                  seed::Nullable{Int}=Nullable(1234),
-                  is_perm::Bool=false)
+                  seed::Nullable{Int}=Nullable(1234)
+                  )
 
   @set_seed
 
@@ -118,10 +120,8 @@ function ensemble(outcome::Outcome,
     DataInfo(outcome, diff_wpm, all_subjects, region, d)
   end
 
-  common_ids::Ids = dis |> values |> collect |> getCommonIds
-
   XYs::Dict{DataSet, XY} = allDs(XY) do d
-    X, y =  getXyMat(dis[d], common_ids)
+    X, y =  getXyMat(dis[d], ids)
     X, y
   end
 
@@ -129,8 +129,6 @@ function ensemble(outcome::Outcome,
     X, y = XYs[d]
     svrPipelineGen(X, y)
   end
-
-  getRepetitionIxs = getRepetitionSamplesGen(length(common_ids), n_repetitions, is_perm)
 
   function fit(repetition_ix::Int64)
 
@@ -182,24 +180,22 @@ function ensemble(outcome::Outcome,
     test(r)
   end
 
-  scores, common_ids, getRepetitionIxs
+  scores
 end
 
 
 type State
-  set_ixs::Vector{Bool}
+  setreps::Vector{Bool}
   cs::Vector{Float64}
   c_range::Nullable{CRange}
   getrepixs::Function
-  ids::Ids
 end
 
 function State(n_repetitions::Int64)
   State(zeros(Bool, n_repetitions),
         zeros(Float64, n_repetitions),
         Nullable{CRange}(),
-        i::Int64 -> error("not set yet"),
-        ASCIIString[]
+        i::Int64 -> error("not set yet")
         )
 end
 
@@ -213,7 +209,7 @@ function findOptimumCandUpdateStateGen(state_map::Dict{DataInfo, State},
   function updateState!(di::DataInfo, repetition_ix::Int64,
                         C::Float64, min_C::Float64, max_C::Float64)
     state::State = get(state_map, di, State(n_repetitions))
-    state.set_ixs[repetition_ix] = true
+    state.setreps[repetition_ix] = true
 
     prev_range::Nullable{CRange} = state.c_range
     if isnull(prev_range)
@@ -228,7 +224,7 @@ function findOptimumCandUpdateStateGen(state_map::Dict{DataInfo, State},
 
   fn(X::Matrix{Float64}, y::Vector{Float64}, di, repetition_ix::Int64) = begin
     state::State = get(state_map, di, State(n_repetitions))
-    if state.set_ixs[repetition_ix]
+    if state.setreps[repetition_ix]
       return state.cs[repetition_ix]
     end
 
@@ -248,31 +244,35 @@ function run(n_repetitions::Int64=1000, is_perm=false)
 
   get_C!::Function = findOptimumCandUpdateStateGen(state_map, n_repetitions)
 
-  pred(weights::Dict{DataSet, Float64}) = ensemble(adw, get_C!,
+  mkDi(ds::DataSet) = DataInfo(adw, diff_wpm, all_subjects, left_select2, ds)
+  conn_di, lesion_di = @>> [conn, lesion] map(mkDi)
+
+  common_ids::Ids = getCommonIds([conn_di, lesion_di])
+
+  getrepixs = getRepetitionSamplesGen(length(common_ids),
+    n_repetitions, is_perm)
+
+  pred(weights::Dict{DataSet, Float64}) = ensemble(adw, get_C!, common_ids,
+                                                   getrepixs,
                                                    weights=weights,
-                                                   n_repetitions=n_repetitions,
-                                                   is_perm=is_perm)
+                                                   n_repetitions=n_repetitions
+                                                   )
 
   println("predicting ensemble")
-  pred_55, ids_55, get_ixs_55 = pred(Dict(conn => .5, lesion => .5))
+  pred_55 = pred(Dict(conn => .5, lesion => .5))
 
   println("predicting lesion")
-  pred_lesion, ids_lesion, get_ixs_lesion = pred(Dict(lesion => 1.))
+  pred_lesion = pred(Dict(lesion => 1.))
 
   println("predicting connection")
-  pred_conn, ids_conn, get_ixs_conn = pred(Dict(conn => 1.))
+  pred_conn = pred(Dict(conn => 1.))
 
   ret = Dict()
   ret[:preds] = Dict(:55 => pred_55, :conn => pred_conn, :lesion => pred_lesion)
   ret[:state] = state_map
 
-  mkDi(ds::DataSet) = DataInfo(adw, diff_wpm, all_subjects, left_select2, ds)
-
-  ret[:state][mkDi(conn)].getrepixs = get_ixs_conn
-  ret[:state][mkDi(conn)].ids = ids_conn
-
-  ret[:state][mkDi(lesion)].getrepixs = get_ixs_lesion
-  ret[:state][mkDi(lesion)].ids = ids_lesion
+  ret[:ids] = common_ids
+  ret[:getrepixs] = getrepixs
 
   ret
 end
