@@ -128,7 +128,7 @@ function calcCoefs(di::DataInfo,
     typealias TrainTestIxs Tuple{XyIxs, XyIxs}
 
     function fn(repetition_ix::Int64)
-      println(repetition_ix)
+      println("repetition index: $(repetition_ix)")
 
       paramState(pipe, :svr)[:C] = Cs[repetition_ix]
 
@@ -197,4 +197,89 @@ function saveStep4Array(arr::AbstractArray{Float64}, f_name)
   dir = getDataDir!("step4", "svr")
   full_path = joinpath(dir, "$(f_name).csv")
   writecsv(full_path, arr)
+end
+
+
+function saveEnsembleAnalysis(analysis::Dict, name::AbstractString)
+  saveCs(analysis[:state], name)
+  savePredScores(analyis[:preds][55], "$(name)_left_select2_ensemble")
+
+  coefs = calcAllCoefs(analysis[:state], analysis[:ids], analysis[:getrepixs])
+  saveCalcCoefs(coefs, name)
+end
+
+
+function calcPermCoefs(di::DataInfo,
+  ids::Ids,
+  cs::AbstractString,
+  scores::AbstractString,
+  perm_coefs_df::AbstractString)
+
+  cs_arr, scores_arr = @>> (cs, scores) map(f -> readcsv(f, Float64)[:])
+  calcPermCoefs(di, ids, cs_arr, scores_arr, readtable(perm_coefs_df))
+end
+
+
+function calcPermCoefs(di, ids, cs::Vector, scores::Vector, perm_coefs_df)
+  num_cs = length(cs)
+  @assert num_cs == length(scores)
+
+  weighted_c = dot(cs, scores)/sum(scores)
+  println("c: $(weighted_c)")
+
+  ixs = 1:length(ids)
+
+  getrepixs(i) = ((ixs, ixs), (ixs, ixs))
+
+  coefs_df::DataFrame = begin
+    coefs_analysis = calcCoefs(di, getrepixs, ids, [weighted_c])
+    di_coefs::Symbol = symbol(di, "_coefs")
+
+    di_scores::Symbol = symbol(di, "_scores")
+    println("scores: $(coefs_analysis[di_scores])")
+
+    coefs_analysis[di_coefs]
+  end
+
+  function getP(n::Symbol)
+    diff = coefs_df[n] .- perm_coefs_df[n]
+
+    null_gt_perm = @>> diff OneSampleTTest pvalue(tail=:left)
+    null_eq_perm = @>> diff OneSampleTTest pvalue
+    null_lt_perm = @>> diff OneSampleTTest pvalue(tail=:right)
+
+    [null_gt_perm, null_eq_perm, null_lt_perm]
+  end
+
+  pvalues = [n => getP(n) for n in names(coefs_df)] |> DataFrame
+
+  pvalues_adj = begin
+    predictors = names(pvalues)
+
+    @assert size(coefs_df) == (1, length(predictors))
+
+    perm_mean = @> perm_coefs_df Matrix mean(1)
+    @assert size(perm_mean) == size(coefs_df)
+
+    perm_std = @> perm_coefs_df Matrix std(1)
+
+    ret = DataFrame(predictor=predictors,
+      coef = Matrix(coefs_df)[:],
+      perm_mean = perm_mean[:],
+      perm_std = perm_std[:])
+
+    pvalues_mat = Matrix(pvalues)
+
+    for (i, ptype) in enumerate([:null_gt_perm, :null_eq_perm, :null_lt_perm])
+      pvalues_arr::Vector{Float64} = pvalues_mat[i, :][:]
+      adj_arr = padjust(pvalues_arr, Bonferroni)
+
+      ret[symbol(ptype, "_adj")] = adj_arr
+      ret[ptype] = pvalues_arr
+    end
+
+    ret
+  end
+
+  pvalues_adj
 end
