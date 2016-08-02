@@ -91,7 +91,7 @@ def convert_excel_meta(src_file, dest_dir='data/step2'):
     }
 
     data = read_excel_data(src_file, column_mappings).dropna()
-    
+
     data = data.loc[data['Stroke Hemisphere'] == 'left', column_mappings.values()]
 
     ##Neded b/c age at test is important, not current day
@@ -132,7 +132,10 @@ def convert_excel(src_file, dest_dir='data/step2/'):
         'PD AVG TDW': 'pd_adw',
         'AverageTotalWords': 'se_atw',
         'AverageDifferentWords': 'se_adw',
-        'Aphasia Type': 'aphasia_type'
+        'Aphasia Type': 'aphasia_type',
+        'Elvis # diff real words ': 'elvis_dw',
+        'SM # diff real words ': 'sm_dw',
+        'MLK # different real words': 'mlk_dw'
     }
 
     data = read_excel_data(src_file, column_mappings)
@@ -155,20 +158,25 @@ def convert_excel(src_file, dest_dir='data/step2/'):
     for c in numeric_cols:
         data[c] = [float_or_nan(i) for i in data[c]]
 
-    base_cols = {n[3:] for n in numeric_cols}
+    average_words_measures = ['adw', 'atw']
 
     def not_nan(arr):
         return np.logical_not(np.isnan(arr))
 
     ret = dict()
 
-    for c in base_cols:
+    for c in average_words_measures:
         def prepend(test_type): return test_type + "_" + c
 
         def n_nan(test_type): return not_nan(data[prepend(test_type)])
 
         valid_rows = np.logical_and(n_nan('se'), n_nan('pd'))
-        df = data.loc[valid_rows, ['id', 'aphasia_type'] + [prepend(k) for k in ['se', 'pd']]]
+
+        dw_cols = [n for n in data.columns if '_dw' in n]
+
+        df = data.loc[valid_rows, ['id', 'aphasia_type'] +
+            [prepend(k) for k in ['se', 'pd']]
+            ]
 
         pd_z = 'pd_' + c + '_z'
         se_z = 'se_' + c + '_z'
@@ -177,6 +185,13 @@ def convert_excel(src_file, dest_dir='data/step2/'):
         df[c + '_z'] = df[se_z] - df[pd_z]
 
         df[c + '_diff_wpm'] = df[prepend('se')] * 2 - df[prepend('pd')]
+
+        if c == 'adw':
+            df['pd_adw_wps'] = df[prepend('pd')]/120
+            
+            df[dw_cols] = data[dw_cols]
+            df['se_adw_wps'] = sum([df[m] for m in dw_cols])/125.0
+            df['adw_diff_wps'] = df['se_adw_wps'] - df['pd_adw_wps']
 
         dest_f = os.path.join(dest_dir, c+'_outcomes.csv')
         df.to_csv(dest_f, index=False)
