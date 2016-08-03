@@ -187,11 +187,7 @@ def convert_excel(src_file, dest_dir='data/step2/'):
         df[c + '_diff_wpm'] = df[prepend('se')] * 2 - df[prepend('pd')]
 
         if c == 'adw':
-            df['pd_adw_wps'] = df[prepend('pd')]/120
-            
             df[dw_cols] = data[dw_cols]
-            df['se_adw_wps'] = sum([df[m] for m in dw_cols])/125.0
-            df['adw_diff_wps'] = df['se_adw_wps'] - df['pd_adw_wps']
 
         dest_f = os.path.join(dest_dir, c+'_outcomes.csv')
         df.to_csv(dest_f, index=False)

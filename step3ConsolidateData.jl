@@ -93,6 +93,27 @@ function consolidateLesionX(csv_dir="data/step1/lesion";
 end
 
 
+function calcWpsDiff!(y::DataFrame)
+  second_look_up = Dict(:elvis_dw => 38, :mlk_dw => 44, :sm_dw => 43)
+  num_rows = size(y, 1)
+
+  naZeros(k::Symbol, v) = [isna(i) ? 0. : v for i in y[k]]
+  naZeros(k::Symbol) = [isna(i) ? 0. : i for i in y[k]]
+
+  total_seconds = reduce(zeros(num_rows), keys(second_look_up)) do acc, k
+    acc .+ naZeros(k, second_look_up[k])
+  end
+
+  y[:se_adw_wps] = sum([naZeros(k) for k in keys(second_look_up)])./total_seconds
+
+  y[:pd_adw_wps] = y[:pd_adw]/120.
+
+  y[:adw_diff_wps] = y[:se_adw_wps] - y[:pd_adw_wps]
+
+  y
+end
+
+
 function consolidateXwithY(consolidated_x::DataFrame,
                               y_dir="data/step2/";
                               dest_dir::OptDir=OptDir())
@@ -107,6 +128,8 @@ function consolidateXwithY(consolidated_x::DataFrame,
   for yo in ["adw", "atw"]
     y_src = joinpath(y_dir, "$(yo)_outcomes.csv")
     y = readtable(y_src)
+    (yo == "adw") && calcWpsDiff!(y)
+    
     full = begin
       xy = idjoin(consolidated_x, y)
       idjoin(xy, meta)
