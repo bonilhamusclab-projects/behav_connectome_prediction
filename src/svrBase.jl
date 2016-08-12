@@ -28,9 +28,10 @@ function learningCurve(svr::PyObject,
                         region::Region,
                         subject_group::SubjectGroup,
                         train_ratios::AbstractVector{Float64};
+                        t::Target=diff_wpm,
                         score_fn::Function=r2Score)
 
-  X, y = getXyMat(o, diff_wpm, dataset=dataset, region=region, subject_group=subject_group)
+  X, y = getXyMat(o, t, dataset=dataset, region=region, subject_group=subject_group)
   num_samples::Int64 = length(y)
 
   train_sizes::Vector{Int64} = ratiosToCounts(train_ratios, num_samples)
@@ -90,19 +91,22 @@ function learningCurve(o::Outcome;
                         C=1.0,
                         subject_group::SubjectGroup=all_subjects,
                         seed::Nullable{Int}=Nullable(1234),
-                        train_ratios::AbstractVector{Float64}=1./6:1./6:1.)
+                        train_ratios::AbstractVector{Float64}=1./6:1./6:1.,
+                        t::Target=diff_wpm
+                        )
   isnull(seed) || srand(get(seed))
 
   svr = LinearSVR(C=C)
   lc_cvg_gen = getCvgGen(RandomSub, 25)
-  learningCurve(svr, lc_cvg_gen, o, dataset, region, subject_group, train_ratios)
+  learningCurve(svr, lc_cvg_gen, o, dataset, region, subject_group, train_ratios,
+    t=t)
 end
 
 
 function learningCurve(di::DataInfo, C::Float64; seed::Nullable{Int}=Nullable(1234),
                         train_ratios::AbstractVector{Float64}=1./6:1./6:1.)
   learningCurve(di.outcome, region=di.region, C=C, subject_group=di.subject_group, seed=seed,
-                 train_ratios=train_ratios)
+                 train_ratios=train_ratios; t=di.target)
 end
 
 
@@ -201,22 +205,29 @@ function normalizeData(X::AbstractArray,
 end
 
 
-normalizeDataWithStateGen(state::Dict = Dict()) = Xy::XY -> begin
+updateStateMeanStdGen(state::Dict) = Xy::XY -> begin
+  X, _ = Xy
+
+  state[:feature_means] = mean(X, 1)[:]
+  state[:feature_stds] = std(X, 1)[:]
+
+  Xy
+end
+
+
+doSomethingGen(fn, run) = run ? Xy::XY -> fn(Xy) : identity
+
+
+normalizeDataGen(state::Dict, run) = doSomethingGen(run) do Xy::XY
   X, y = Xy
 
-  feature_means::AbstractVector = mean(X, 1)[:]
-  feature_stds::AbstractVector = std(X, 1)[:]
-
-  norm_X = normalizeData(X, feature_means, feature_stds)
-
-  state[:feature_means] = feature_means
-  state[:feature_stds] = feature_stds
+  norm_X = normalizeData(X, state[:feature_means], state[:feature_stds])
 
   norm_X, y
 end
 
 
-takeVariantColsGen(state::Dict) = Xy::XY -> begin
+selectVariantColsGen(state::Dict, run) = doSomethingGen(run) do Xy::XY
   X, y = Xy
   variantCols = state[:feature_stds] .> 1e-6
 
@@ -224,37 +235,81 @@ takeVariantColsGen(state::Dict) = Xy::XY -> begin
 end
 
 
-function svrPipelineGen(X::Matrix, y::Vector)
+updateStateBiasGen(state::Dict) = Xy::XY -> begin
+  X, y = Xy
+
+  state[:cors] = cor(X, y)
+  state[:bias] = if sum(state[:cors] .< 0) > sum(state[:cors] .> 0)
+    -1 * maximum(y)
+  else
+    -1 * minimum(y)
+  end
+
+  X, y
+end
+
+
+offsetBiasGen(state::Dict, run) = doSomethingGen(run) do Xy::XY
+  Xy[1], Xy[2] + state[:bias]
+end
+
+
+reverseBiasGen(state::Dict, run) = y::Vector -> run ? y - state[:bias] : y
+
+
+function svrPipelineGen(di::DataInfo)
+  X, y = getXyMat(di)
+  svrPipelineGen(X, y)
+end
+
+
+function svrPipelineGen(X::Matrix, y::Vector;
+  normalize::Bool=false,
+  include_bias::Bool=false,
+  select_variant_cols::Bool=true)
+
   svr = LinearSVR()
 
-  state = Dict{Symbol, Any}(:svr => svr)
+  state = Dict{Symbol, Any}(:svr => svr, :svr_C => svr[:C])
 
   selectData(ixs::IXs; y_ixs::IXs=ixs) = X[ixs, :], y[y_ixs]
 
-  takeVariantCols = takeVariantColsGen(state)
+  selectVariantCols = selectVariantColsGen(state, select_variant_cols)
+
+  normalizeData = normalizeDataGen(state, normalize)
+
+  offsetBias = offsetBiasGen(state, include_bias)
+  reverseBias = reverseBiasGen(state, include_bias)
 
   fit_fns::Functions = begin
-    ##Use if normalizing
-    normalizeData! = normalizeDataWithStateGen(state)
-    ##
+    updateStateBias! = updateStateBiasGen(state)
 
-    svrFit!(Xy::XY) = svr[:fit](Xy[1], Xy[2])
+    updateStateMeanStd! = updateStateMeanStdGen(state)
 
-    [selectData, svrFit!]
+    function svrFit!(Xy::XY)
+      svr[:C] = state[:svr_C]
+      svr[:fit](Xy[1], Xy[2])
+    end
+
+    [selectData, updateStateBias!, updateStateMeanStd!,
+      normalizeData, selectVariantCols, offsetBias,
+      svrFit!]
   end
 
   predict_fns::Functions = begin
     onlyX(Xy::XY) = Xy[1]
     mockY(X::Matrix) = (X, Float64[])
 
-    ##Use if normalizing
-    nData(X::Matrix) = normalizeData(X, state[:feature_means], state[:feature_stds])
-    takeVariantColsX(X::Matrix) = X |> mockY |> takeVariantCols |> onlyX
-    ##
+    normalizeXdata(X::Matrix) = X |> mockY |> normalizeData |> onlyX
+
+    selectVariantColsX(X::Matrix) = X |> mockY |> selectVariantCols |> onlyX
 
     svrPredict(X::Matrix) = svr[:predict](X)
 
-    [selectData, onlyX, svrPredict]
+    [selectData, onlyX,
+      normalizeXdata, selectVariantColsX,
+      svrPredict, reverseBias
+      ]
   end
 
   Pipeline(fit_fns, predict_fns, r2score, y, state)

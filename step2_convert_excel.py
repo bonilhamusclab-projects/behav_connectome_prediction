@@ -133,9 +133,18 @@ def convert_excel(src_file, dest_dir='data/step2/'):
         'AverageTotalWords': 'se_atw',
         'AverageDifferentWords': 'se_adw',
         'Aphasia Type': 'aphasia_type',
-        'Elvis # diff real words ': 'elvis_dw',
-        'SM # diff real words ': 'sm_dw',
-        'MLK # different real words': 'mlk_dw'
+        'Elvis # diff real words ': 'se_elvis_dw',
+        'SM # diff real words ': 'se_sm_dw',
+        'MLK # different real words': 'se_mlk_dw',
+        'Elvis # real words ': 'se_elvis_tw',
+        'SM # real words ': 'se_sm_tw',
+        'MLK # real words': 'se_mlk_tw',
+        'PD Picnic: TDW': 'pd_picnic_dw',
+        'PD Cookie: TDW': 'pd_cookie_dw',
+        'PD Circus: TDW': 'pd_circus_dw',
+        'PD Picnic: TRW': 'pd_picnic_tw',
+        'PD Cookie: TRW': 'pd_cookie_tw',
+        'PD Circus: TRW': 'pd_circus_tw'
     }
 
     data = read_excel_data(src_file, column_mappings)
@@ -172,7 +181,6 @@ def convert_excel(src_file, dest_dir='data/step2/'):
 
         valid_rows = np.logical_and(n_nan('se'), n_nan('pd'))
 
-        dw_cols = [n for n in data.columns if '_dw' in n]
 
         df = data.loc[valid_rows, ['id', 'aphasia_type'] +
             [prepend(k) for k in ['se', 'pd']]
@@ -186,8 +194,9 @@ def convert_excel(src_file, dest_dir='data/step2/'):
 
         df[c + '_diff_wpm'] = df[prepend('se')] * 2 - df[prepend('pd')]
 
-        if c == 'adw':
-            df[dw_cols] = data[dw_cols]
+        w_col_end = '_dw' if c == "adw" else '_tw'
+        w_cols = [n for n in data.columns if n.endswith(w_col_end)]
+        df[w_cols] = data[w_cols]
 
         dest_f = os.path.join(dest_dir, c+'_outcomes.csv')
         df.to_csv(dest_f, index=False)

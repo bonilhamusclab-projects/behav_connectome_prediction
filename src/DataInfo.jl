@@ -45,14 +45,14 @@ function getXyMat(di::DataInfo, ids::Ids)
   data::DataFrame, predictors::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
     getData(di)
 
-  ixs = getIdIxs(di, ids)
+  ixs::Vector{Int64} = getIdIxs(di, ids)
 
   X::Matrix{Float64} = begin
     x_cols::Vector{Symbol} = [predictors; covars]
-    Matrix(data[ixs, predictors])
+    data[ixs, x_cols] |> Matrix
   end
 
-  y::Vector{Float64} = Array(data[ixs, target_col])
+  y::Vector{Float64} = data[ixs, target_col] |> Array
 
   X, y
 end

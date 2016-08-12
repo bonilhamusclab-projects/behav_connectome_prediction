@@ -1,4 +1,5 @@
 using DataFrames
+using Lazy
 using Memoize
 
 
@@ -93,8 +94,14 @@ function consolidateLesionX(csv_dir="data/step1/lesion";
 end
 
 
-function calcWpsDiff!(y::DataFrame)
-  second_look_up = Dict(:elvis_dw => 38, :mlk_dw => 44, :sm_dw => 43)
+function calcWpsDiff!(y::DataFrame, outcome::ASCIIString)
+  ending = symbol('_', outcome[end-1:end])
+  addEnding(s) = symbol(s, ending)
+
+  second_look_up = Dict(addEnding(:se_elvis) => 38,
+    addEnding(:se_mlk) => 44,
+    addEnding(:se_sm) => 43)
+
   num_rows = size(y, 1)
 
   naZeros(k::Symbol, v) = [isna(i) ? 0. : v for i in y[k]]
@@ -104,11 +111,21 @@ function calcWpsDiff!(y::DataFrame)
     acc .+ naZeros(k, second_look_up[k])
   end
 
-  y[:se_adw_wps] = sum([naZeros(k) for k in keys(second_look_up)])./total_seconds
 
-  y[:pd_adw_wps] = y[:pd_adw]/120.
+  se_o_wps = symbol(:se_, outcome, :_wps)
+  pd_o_wps = symbol(:pd_, outcome, :_wps)
+  pd_o_wps_picnic = symbol(:pd_, outcome, :_wps, :_picnic)
 
-  y[:adw_diff_wps] = y[:se_adw_wps] - y[:pd_adw_wps]
+  y[se_o_wps] = sum([naZeros(k) for k in keys(second_look_up)])./total_seconds
+
+  y[pd_o_wps] = y[symbol(:pd_, outcome)]./y[:picnic_seconds]
+  y[pd_o_wps_picnic] = y[addEnding(:pd_picnic)]./y[:picnic_seconds]
+
+  o_diff_wps = symbol(outcome, :_diff_wps)
+  o_diff_wps_picnic = symbol(o_diff_wps, :_picnic)
+
+  y[o_diff_wps] = y[se_o_wps] - y[pd_o_wps]
+  y[o_diff_wps_picnic] = y[se_o_wps] - y[pd_o_wps_picnic]
 
   y
 end
@@ -118,32 +135,40 @@ function consolidateXwithY(consolidated_x::DataFrame,
                               y_dir="data/step2/";
                               dest_dir::OptDir=OptDir())
 
-  @assert in(:id, names(consolidated_x))
+  @assert :id in names(consolidated_x)
 
   ret = Dict()
-  meta = readtable(joinpath(y_dir, "meta.csv"))
+  meta = @> y_dir joinpath("meta.csv") readtable
+  picnic_seconds = @> y_dir joinpath("picnic_seconds.csv") readtable
 
   idjoin(a, b) = join(a, b, on=:id)
 
   for yo in ["adw", "atw"]
     y_src = joinpath(y_dir, "$(yo)_outcomes.csv")
     y = readtable(y_src)
-    (yo == "adw") && calcWpsDiff!(y)
-    
-    full = begin
-      xy = idjoin(consolidated_x, y)
-      idjoin(xy, meta)
+
+    full = @> consolidated_x begin
+      idjoin(y)
+      idjoin(meta)
+      idjoin(picnic_seconds)
     end
 
-    max_num_rows = min(size(consolidated_x, 1), size(y, 1))
-    num_cols = size(consolidated_x, 2) + size(y, 2) + size(meta, 2) - 2
+    max_num_rows = @> size(consolidated_x, 1) min(size(y, 1))
+    num_cols = size(consolidated_x, 2) + size(y, 2) + size(meta, 2) + size(picnic_seconds, 2) - 3
 
     @assert size(full, 1) <= max_num_rows
     @assert size(full, 2) == num_cols
 
+    calcWpsDiff!(full, yo)
+
+    @>> full begin
+      names
+      filter(c -> contains("$c", "diff"))
+      map(c -> full[symbol(c, :_binary)] = full[c] .> 0.)
+    end
+
     if !isnull(dest_dir)
-      dest_path = joinpath(get(dest_dir), "full_$(yo).csv")
-      writetable(dest_path, full)
+      @> dest_dir get joinpath("full_$(yo).csv") writetable(full)
     end
 
     ret[yo] = full

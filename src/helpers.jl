@@ -5,7 +5,7 @@ using Memoize
 
 @enum Outcome adw atw
 
-@enum Target diff_wpm se
+@enum Target diff_wpm se diff_wps
 
 @enum Region full_brain left left_select left_select2
 
@@ -114,11 +114,10 @@ function createPredictorNames(predictors::Vector{Symbol}, d::DataSet)
 end
 
 
-@memoize function getTargetCol(t::Target, m::Outcome)
-  @switch t begin
-    se; symbol("$(t)_$m")
-    diff_wpm; symbol("$(m)_$t")
-  end
+@memoize getTargetCol(t::Target, m::Outcome) = if t == se
+  symbol("$(t)_$m")
+else
+  symbol("$(m)_$t")
 end
 
 
@@ -140,9 +139,10 @@ end
   subjectFilterGenGen(s)(m)(df)
 end
 
-getCovarsForTarget(t::Target, m::Outcome) = @switch t begin
-  se; Symbol[symbol("pd_$(m)")]
-  diff_wpm; Symbol[]
+getCovarsForTarget(t::Target, m::Outcome) = if t == se
+  Symbol[symbol("pd_$(m)")]
+else
+  Symbol[]
 end
 
 

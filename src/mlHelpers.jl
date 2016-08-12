@@ -100,10 +100,12 @@ function pipeTest(pipe::Pipeline, x_ixs::IXs, y_ixs::IXs)
 end
 
 
-function getTrainTestScores(pipe::Pipeline, cvg::CrossValGenerator,
-    num_samples::Int64)
-
+function getTrainTestScores(pipe::Pipeline, cvg::CrossValGenerator)
   num_iterations = length(cvg)
+  num_samples = length(pipe.truths)
+
+  preds = zeros(Float64, num_samples)
+  test_counts = zeros(Int64, num_samples)
 
   train_scores = zeros(Float64, num_iterations)
   fit_call = 0
@@ -114,10 +116,14 @@ function getTrainTestScores(pipe::Pipeline, cvg::CrossValGenerator,
     train_scores[fit_call] = pipeTest(pipe, ixs)
   end
 
-  test(_, ixs::IXs) = pipeTest(pipe, ixs)
+  function test(_, ixs::IXs)
+    test_counts[ixs] += 1
+    preds[ixs] = (pipePredict(pipe, ixs) + (test_counts[ixs] - 1) .* preds[ixs])./test_counts[ixs]
+    pipeTest(pipe, ixs)
+  end
 
   test_scores = cross_validate(fit, test, num_samples, cvg)
-  train_scores, test_scores
+  train_scores, test_scores, preds
 end
 
 typealias EvalInput{T <: AbstractVector} Pair{Symbol, T}
@@ -153,59 +159,81 @@ function _evalInputToModelStates(ei...)
 end
 
 
-function evalModelParallel(pipeGen::Function, cvg::CrossValGenerator, num_samples::Int64,
-  states...)
-
-  all_combos::Combos = _evalInputToModelStates(states...)
-
-  scores = map(all_combos) do combo::ModelState
-    pipe = pipeGen()
-    modelState!(pipe, combo)
-    train_scores, test_scores = getTrainTestScores(pipe, cvg, num_samples)
-    mean(train_scores), mean(test_scores)
-  end
-
-  [t[1] for t in scores], [t[2] for t in scores], all_combos
+function meanTrainTest{T <: AbstractVector}(train::T, test::T)
+  (mean(train), mean(test))
 end
 
 
-function meanTrainTest{T <: AbstractVector}(train_test::Tuple{T, T})
-  (mean(train_test[1]), mean(train_test[2]))
-end
-
-
-function evalModel(pipe::Pipeline, cvg::CrossValGenerator, num_samples::Int64,
+function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
     agg::Function=meanTrainTest, states...)
 
   all_combos::Combos = _evalInputToModelStates(states...)
 
-  scores = map(all_combos) do combo::ModelState
+  preds = zeros(Float64, length(pipe.truths), length(all_combos))
+
+  scores = map(enumerate(all_combos)) do (comboix_combo)
+    combo_ix::Int64, combo::ModelState = comboix_combo
+
     modelState!(pipe, combo)
-    getTrainTestScores(pipe, cvg, num_samples) |> agg
+    train_scores, test_scores, curr_preds = getTrainTestScores(pipe, cvg)
+
+    preds[:, combo_ix] = curr_preds
+    agg(train_scores, test_scores)
   end
 
-  Float64[t[1] for t in scores], Float64[t[2] for t in scores], all_combos
+  train_scores = Float64[t[1] for t in scores]
+  test_scores = Float64[t[2] for t in scores]
+
+  train_scores, test_scores, all_combos, preds
 end
 
 
-function plotEvalModel(train_scores, test_scores, labels)
-  function mkLayer(scores, clr)
-    color = eval(parse("colorant\"$clr\""))
-    layer(y = scores, x = labels, Geom.point, Theme(default_color=color))
+function stringifyLabels(labels::Vector{ModelState})
+  mkLabel(p::ParamState) = "$(p[1]): $(p[2])"
+
+  map(labels) do m::ModelState
+    @> map(mkLabel, m) join("; ")
   end
-  plot(mkLayer(train_scores, "deepskyblue"),
-       mkLayer(test_scores, "green"),
+end
+
+
+function scoresLayer(scores, clr, x)
+  color = "colorant\"$clr\"" |> parse |> eval
+  layer(y=scores, x=x, Geom.point, Geom.smooth, Theme(default_color=color))
+end
+
+
+function plotPreds(truths, preds::Vector, subjects)
+  perm_ixs = sortperm(truths)
+
+  plot(scoresLayer(truths[perm_ixs], "deepskyblue", subjects[perm_ixs]),
+   scoresLayer(preds[perm_ixs], "green", subjects[perm_ixs]),
+   Guide.xlabel("Subject"),
+   Guide.ylabel("Score"))
+end
+
+function plotPreds(truths, model_eval, subjects)
+  best_score_ix = model_eval[2] |> sortperm |> last
+  preds = model_eval[4][:, best_score_ix]
+  plotPreds(truths, preds, subjects)
+end
+
+
+function plotEvalModel(train_scores, test_scores, labels::Vector{ASCIIString})
+  plot(scoresLayer(train_scores, "deepskyblue", labels),
+       scoresLayer(test_scores, "green", labels),
        Guide.xlabel("Model State"),
        Guide.ylabel("Score"))
 end
 
+
 typealias Scores Vector{Float64}
-function plotEvalModel{T}(modelEval::Tuple{Scores, Scores, Vector{T}})
-  mkLabel(p::ParamState) = "$(p[1]): $(p[2])"
-  mkLabel(m::ModelState) = join(map(mkLabel, m), "; ")
-  labels = map(mkLabel, modelEval[3])
-  plotEvalModel(modelEval[1], modelEval[2], labels)
+function plotEvalModel(trains::Scores, tests::Scores, labels::Vector{ModelState})
+  @>> labels stringifyLabels plotEvalModel(trains, tests)
 end
+
+
+plotEvalModel(model_eval) = plotEvalModel(model_eval[1], model_eval[2], model_eval[3])
 
 
 sqDist(x, y) = norm( (y - x).^2, 1)
