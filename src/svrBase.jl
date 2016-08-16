@@ -82,7 +82,7 @@ function getCvgGen(cvgT::Type, n_folds::Int64)
     RandomSub(n_subjects, round(Int64, train_ratio * n_subjects), n_folds)
   end
   @switch cvgT begin
-    Kfold; (n_subjects::Int64) -> Kfold(n_subjects, n_folds)
+    Kfold; n_subjects::Int64 -> Kfold(n_subjects, n_folds)
     RandomSub; mkRandomSub
   end
 end

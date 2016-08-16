@@ -48,14 +48,44 @@ histonan(arr) = @> arr dropnan histogram
 plotCorrsGen(df, preds) = p -> calcCorrelations(df, preds, p)[:cor] |> histonan
 
 
-function trainContinuousTestCategorical(pipe, toCat = arr -> arr .>= 0)
-  fit_fns = Function[ixs -> pipeFit!(pipe, ixs)]
+function trainContinuousTestCategorical(pipe, toCat = arr -> arr .>= 0;
+  state_keys::Vector{Symbol} = [:C, :classifier],
+  on_continuous_pred_calc::Function = (arr, ixs, p) -> ()
+  )
+
+  state = ModelState()
+
+  fit_fns = begin
+    function fn!(x_ixs::IXs; y_ixs::IXs=x_ixs)
+      for kv in state
+        paramState!(pipe, kv)
+      end
+
+      pipeFit!(pipe, x_ixs, y_ixs)
+
+      for k in state_keys
+        state[k] = paramState(pipe, k)
+      end
+    end
+    [fn!]
+  end
 
   truths_cat = pipe.truths |> toCat
 
-  predict_fns = [ixs -> pipePredict(pipe, ixs) |> toCat]
+  predict_fns = begin
+    predict_call = 0
+    function fn(x_ixs::IXs; y_ixs::IXs = x_ixs)
+      continuous_preds = pipePredict(pipe, x_ixs, y_ixs)
 
-  Pipeline(fit_fns, predict_fns, f1score, truths_cat, ModelState())
+      predict_call += 1
+      on_continuous_pred_calc(continuous_preds, y_ixs, predict_call)
+
+      continuous_preds |> toCat
+    end
+    [fn]
+  end
+
+  Pipeline(fit_fns, predict_fns, accuracy, truths_cat, state)
 end
 
 

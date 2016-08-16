@@ -8,6 +8,7 @@ using Optim
 include("DataInfo.jl")
 include("helpers.jl")
 include("optimizeHelpers.jl")
+include("svrClassify.jl")
 include("svrBase.jl")
 
 
@@ -92,6 +93,32 @@ function findOptimumC!(pipe::Pipeline, cvg_factory::Function;
 end
 
 
+function findOptimumCgrid!(pipe::Pipeline, cvg_factory::Function;
+                      score_train_scores::Function = mean,
+                      score_test_scores::Function = arr -> OneSampleTTest(arr).t,
+                      c_grid::AbstractVector = [logspace(-6, 2, 9); logspace(-6, 2, 9).*5]
+                      )
+  function calcSampleScoresGen(n_samples, train_ratio)
+    cvg = cvg_factory(n_samples, train_ratio, pipe.truths)
+    calcScoresGen(pipe, cvg, n_samples)
+  end
+
+  calc30Scores = calcSampleScoresGen(30, .8)
+  testScore(C::Float64) = calc30Scores(C)[1] |> score_test_scores
+
+  C::Float64 = @>> c_grid begin
+    map(c -> (c, testScore(c)))
+    sort(by=ct -> ct[2], rev=true)
+    map(ct -> ct[1])
+    first
+  end
+
+  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset %s" C -1 * testScore(C) d)
+
+  (C, minimum(c_grid), maximum(c_grid))
+end
+
+
 typealias DataSetMap Dict{DataSet, Float64}
 
 function runPipeline(X::Matrix,
@@ -100,8 +127,6 @@ function runPipeline(X::Matrix,
                   get_C::Function,
                   get_sample_ixs::Function;
                   n_samples::Int64=1000)
-
-  predictions = repmat([NaN], length(y), n_samples)
 
   coefficients = zeros(Float64, size(X, 2), n_samples)
 
@@ -113,14 +138,14 @@ function runPipeline(X::Matrix,
     pipeFit!(pipe, x_train_ixs, y_train_ixs)
   end
 
-  function test(x_test_ixs, y_test_ixs, sample_ix)
-    preds = predictions[y_test_ixs, sample_ix] = pipePredict(pipe,
-      x_test_ixs, y_test_ixs)
+  test(x_test_ixs, y_test_ixs) = pipeTest(pipe, x_test_ixs, y_test_ixs)
 
-    r2Score(y[y_test_ixs], preds)
-  end
-
+  prev_show = 0
   scores::Vector{Float64} = map(1:n_samples) do s::Int64
+    if (s - prev_show)/n_samples > .1
+      prev_show = s
+      println("at $s out of $(n_samples)")
+    end
     (x_train_ixs, y_train_ixs), (x_test_ixs, y_test_ixs) = get_sample_ixs(s)
 
     fit!(x_train_ixs, y_train_ixs, s)
@@ -129,10 +154,10 @@ function runPipeline(X::Matrix,
     variant_features = paramState(pipe, :variant_features)
     coefficients[variant_features, s] = coefs
 
-    test(x_test_ixs, y_test_ixs, s)
+    test(x_test_ixs, y_test_ixs)
   end
 
-  scores, predictions, coefficients
+  scores, coefficients
 end
 
 
@@ -151,16 +176,17 @@ end
 
 
 function findOptimumCandUpdateStateGen(state::State,
-    pipe_factory::Function, cvg_factory::Function)
+    pipe_factory::Function, cvg_factory::Function;
+    grid_search::Bool=false)
 
   n_samples = state.cs |> length
 
   function updateState!(sample_ix::Int64,
                         C::Float64, min_C::Float64, max_C::Float64)
 
-    if isnull(state.c_range)
+#=    if isnull(state.c_range)
       state.c_range = @> CRange(min_C/1.5, max_C*1.5) Nullable
-    end
+    end=#
 
     state.cs[sample_ix] = C
   end
@@ -168,8 +194,11 @@ function findOptimumCandUpdateStateGen(state::State,
   function findOptimumCandUpdateState(X::Matrix, y::Vector, sample_ix::Int64)
     pipe = pipe_factory(X, y)
 
-    C::Float64, min_C::Float64, max_C::Float64 = findOptimumC!(
-      pipe, cvg_factory, c_range=state.c_range)
+    C::Float64, min_C::Float64, max_C::Float64 = if grid_search
+      findOptimumCgrid!(pipe, cvg_factory)
+    else
+      findOptimumC!(pipe, cvg_factory, c_range=state.c_range)
+    end
 
     updateState!(sample_ix, C, min_C, max_C)
     C
@@ -203,13 +232,13 @@ function calcEnsemble(preds_lesion::Matrix, preds_conn::Matrix, truths::Vector;
 end
 
 
-function runRegress(n_samples::Int64=100, is_perm=false; target::Target=diff_wpm)
+function runClass(n_samples::Int64=100, is_perm=false)
 
   state_map::Dict{DataSet, State} = Dict{DataSet, State}(
     conn => State(n_samples), lesion => State(n_samples))
 
   conn_di, lesion_di = map([conn, lesion]) do ds::DataSet
-    DataInfo(adw, target, all_subjects, left_select2, ds)
+    DataInfo(adw, diff_wps, all_subjects, left_select2, ds)
   end
 
   x_conn, x_lesion, y = begin
@@ -228,39 +257,73 @@ function runRegress(n_samples::Int64=100, is_perm=false; target::Target=diff_wpm
   sample_size = length(y)
 
   function cvgFactory(n_samples, train_ratio, ys)
-    sample_size = length(ys)
-    getCvgGen(RandomSub, n_samples)(sample_size, train_ratio)
+    StratifiedRandomSub(ys .>= 0, round(Int64, length(ys) * train_ratio), n_samples)
   end
 
   get_sample_ixs = @> n_samples cvgFactory(.8, y) samplesGen(sample_size, is_perm)
 
+  function catPipeline(X, y, on_continuous_pred_calc=(arr, ixs, p)->())
+    pipe = svrPipeline(X, y)
+    trainContinuousTestCategorical(pipe,
+      state_keys=[:C, :classifier, :variant_features],
+      on_continuous_pred_calc=on_continuous_pred_calc
+      )
+  end
+
+  initPreds() = repmat([NaN], sample_size, n_samples)
+
+  continuous_preds_map = Dict{DataSet, Matrix}(conn => initPreds(),
+    lesion=>initPreds())
+
   function preds(ds::DataSet)
     state = state_map[ds]
-    get_C! = findOptimumCandUpdateStateGen(state, svrPipeline, cvgFactory)
+    get_C! = findOptimumCandUpdateStateGen(state, catPipeline, cvgFactory,
+      grid_search=true)
+
+    updatePredsMap!(preds, ixs, p) = continuous_preds_map[ds][ixs, p] = preds
 
     x::Matrix = x_map[ds]
 
     runPipeline(x,
       y,
-      svrPipeline(x, y),
+      catPipeline(x, y, updatePredsMap!),
       get_C!,
       get_sample_ixs,
       n_samples=n_samples)
   end
 
   println("predicting lesion")
-  r2s_lesion, preds_lesion, coefs_lesion = preds(lesion)
+  accuracies_lesion, coefs_lesion = preds(lesion)
 
   println("predicting connectivity")
-  r2s_conn, preds_conn, coefs_conn = preds(conn)
-
-  println("predicting ensemble")
-  r2s_55, preds_ens = calcEnsemble(preds_lesion, preds_conn, y)
+  accuracies_conn, coefs_conn = preds(conn)
 
   ret = Dict()
-  ret[:r2s] = Dict(:55 => r2s_55, :conn => r2s_conn, :lesion => r2s_lesion)
+  ret[:preds_continuous] = Dict(:conn => continuous_preds_map[conn],
+    :lesion => continuous_preds_map[lesion])
+
+  accuracies_55, preds_55 = begin
+    _, preds_continous = calcEnsemble(continuous_preds_map[lesion],
+      continuous_preds_map[conn], y)
+
+    ret[:preds_continuous][:ens] = preds_continous
+
+    preds_ret = repmat([NaN], size(preds_continous)...)
+
+    accuracies_ret = map(1:n_samples) do s
+      valid_ixs = Bool[!isnan(i) for i in preds_continous[:, s]]
+
+      preds_binary = preds_continous[valid_ixs, s] .>= 0
+      preds_ret[valid_ixs, s] = preds_binary
+
+      accuracy(y[valid_ixs] .>= 0, preds_binary)
+    end
+
+    accuracies_ret, preds_ret
+  end
+
+  ret[:accuracies] = Dict(:ens => accuracies_55, :conn => accuracies_conn, :lesion => accuracies_lesion)
   ret[:state] = Dict(conn_di => state_map[conn], lesion_di => state_map[lesion])
-  ret[:preds] = Dict(:55=>preds_ens, :conn=>preds_conn, :lesion=>preds_lesion)
   ret[:coefs] = Dict(:conn => coefs_conn, :lesion => coefs_lesion)
 
   ret[:ids] = common_ids
@@ -270,37 +333,39 @@ function runRegress(n_samples::Int64=100, is_perm=false; target::Target=diff_wpm
 end
 
 
-function runClass(n_samples::Int64=100, is_perm=false)
-  ret = runRegress(n_samples, is_perm, target=diff_wps)
+function saveRunClass(run_class_ret::Dict;
+  target::Target=diff_wps, score_fn::Symbol=:accuracies)
 
-  println("classification")
+  datasetToDataInfo(ds::DataSet) = DataInfo(
+    adw, target, all_subjects, left_select2, ds)
 
-  #training with regression model created more accurate coefficients
-  ret[:preds_binary] = [k => [isnan(i) ? NaN : i > 0 for i in v]
-    for (k, v) in ret[:preds]]
+  dest_dir = @> data_dir() joinpath("step4", "svr_classify")
+  destF(f_name) = joinpath(dest_dir, f_name)
 
-  y = begin
-    mkDi(ds) = DataInfo(adw, diff_wps, all_subjects, left_select2, ds)
+  conn_di = datasetToDataInfo(conn)
+  lesion_di = datasetToDataInfo(lesion)
 
-    conn_di, lesion_di = map(mkDi, [conn, lesion])
-    common_ids = getCommonIds([conn_di, lesion_di])
+  conn_predictors = getPredictors(conn_di)
+  lesion_predictors = getPredictors(lesion_di)
 
-    _, y_conn = getXyMat(conn_di, common_ids)
-    _, y_lesion = getXyMat(lesion_di, common_ids)
-
-    @assert y_conn == y_lesion
-
-    y_conn
+  for (k, v) in run_class_ret[:accuracies]
+    @> "accuracies_$(k).csv" destF writecsv(v)
   end
 
-  function calcF1(preds, sample_ix::Int64)
-    (_, y_test_ixs) = ret[:get_sample_ixs](sample_ix)[2]
-    curr_preds = preds[y_test_ixs] |> BitVector
-    f1score(y[y_test_ixs] .> 0, curr_preds)
+  for (di::DataInfo, s::State) in run_class_ret[:state]
+    @> "cs_$(di).csv" destF writecsv(s.cs)
   end
 
-  ret[:f1s] = [k => map(sample_ix -> calcF1(preds, sample_ix), 1:n_samples)
-    for (k, preds) in ret[:preds_binary]]
+  for (k, v) in run_class_ret[:preds_continuous]
+    @> "preds_continuous_$(k).csv" destF writecsv(v)
+  end
 
-  ret
+  for (k, v) in run_class_ret[:coefs]
+    predictors = @> k == :conn ? conn_predictors : lesion_predictors
+    df = @> v' DataFrame d -> rename!(d, names(d), predictors)
+    @> "predictors_$(k).csv" destF writetable(df)
+  end
+
+  @> "ids.csv" destF writecsv(run_class_ret[:ids])
+
 end

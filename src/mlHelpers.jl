@@ -164,7 +164,7 @@ function meanTrainTest{T <: AbstractVector}(train::T, test::T)
 end
 
 
-doNothing(train_scores::Vector, test_scores::Vector, preds::Matrix, combo_ix::Int64) = ()
+doNothing(train_scores::Vector, test_scores::Vector, preds::Vector, combo_ix::Int64) = ()
 
 
 function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
@@ -193,7 +193,7 @@ function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
   train_scores = Float64[t[1] for t in scores]
   test_scores = Float64[t[2] for t in scores]
 
-  train_scores, test_scores, state_combos, preds
+  train_scores, test_scores, state_combos
 end
 
 
@@ -318,4 +318,10 @@ function r2Score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T}
   denominator::Float64 = @l2_from_true mean(y_true)
 
   1 - numerator/denominator
+end
+
+
+function accuracy{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T})
+  @assert length(y_true) == length(y_pred)
+  sum(y_true .== y_pred)/length(y_true)
 end
