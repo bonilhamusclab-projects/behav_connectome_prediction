@@ -98,7 +98,7 @@ function calcWpsDiff!(y::DataFrame, outcome::ASCIIString)
   ending = symbol('_', outcome[end-1:end])
   addEnding(s) = symbol(s, ending)
 
-  second_look_up = Dict(addEnding(:se_elvis) => 38,
+  se_second_look_up = Dict(addEnding(:se_elvis) => 38,
     addEnding(:se_mlk) => 44,
     addEnding(:se_sm) => 43)
 
@@ -107,19 +107,18 @@ function calcWpsDiff!(y::DataFrame, outcome::ASCIIString)
   naZeros(k::Symbol, v) = [isna(i) ? 0. : v for i in y[k]]
   naZeros(k::Symbol) = [isna(i) ? 0. : i for i in y[k]]
 
-  total_seconds = reduce(zeros(num_rows), keys(second_look_up)) do acc, k
-    acc .+ naZeros(k, second_look_up[k])
+  se_total_seconds = reduce(zeros(num_rows), keys(se_second_look_up)) do acc, k
+    acc .+ naZeros(k, se_second_look_up[k])
   end
-
 
   se_o_wps = symbol(:se_, outcome, :_wps)
   pd_o_wps = symbol(:pd_, outcome, :_wps)
   pd_o_wps_picnic = symbol(:pd_, outcome, :_wps, :_picnic)
 
-  y[se_o_wps] = sum([naZeros(k) for k in keys(second_look_up)])./total_seconds
+  y[se_o_wps] = sum(map(naZeros, se_second_look_up |> keys))./se_total_seconds
 
-  y[pd_o_wps] = y[symbol(:pd_, outcome)]./y[:picnic_seconds]
-  y[pd_o_wps_picnic] = y[addEnding(:pd_picnic)]./y[:picnic_seconds]
+  y[pd_o_wps] = y[symbol(:pd_, outcome)]./120.
+  y[pd_o_wps_picnic] = y[symbol(:pd_, outcome)]./y[:picnic_seconds]
 
   o_diff_wps = symbol(outcome, :_diff_wps)
   o_diff_wps_picnic = symbol(o_diff_wps, :_picnic)

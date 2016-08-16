@@ -79,7 +79,7 @@ pipeFit!(pipe::Pipeline, x_ixs::IXs, y_ixs::IXs, stop_fn::Int64) = _runFns(
 
 pipePredict(pipe::Pipeline, ixs::IXs) = _runFns(pipe, :predicts, ixs)
 pipePredict(pipe, ixs::IXs, stop_fn::Int64) = _runFns(
-  pipe, :predicts, x_ixs, y_ixs, stop_fn)
+  pipe, :predicts, ixs, stop_fn)
 
 pipePredict(pipe::Pipeline, x_ixs::IXs, y_ixs::IXs) = _runFns(
   pipe, :predicts, x_ixs, y_ixs)
@@ -100,7 +100,7 @@ function pipeTest(pipe::Pipeline, x_ixs::IXs, y_ixs::IXs)
 end
 
 
-function getTrainTestScores(pipe::Pipeline, cvg::CrossValGenerator)
+function trainTestPreds(pipe::Pipeline, cvg::CrossValGenerator)
   num_iterations = length(cvg)
   num_samples = length(pipe.truths)
 
@@ -128,7 +128,7 @@ end
 
 typealias EvalInput{T <: AbstractVector} Pair{Symbol, T}
 typealias Combos Vector{ModelState}
-function _evalInputToModelStates(ei...)
+function stateCombos(ei...)
 
   #enumerate hack to keep ordering
   need_splits::Vector{Int64} = @>> enumerate(ei) begin
@@ -151,7 +151,7 @@ function _evalInputToModelStates(ei...)
         r
       end
 
-      ret =[ret; _evalInputToModelStates(remaining...)]
+      ret =[ret; stateCombos(remaining...)]
     end
 
     ret
@@ -164,36 +164,41 @@ function meanTrainTest{T <: AbstractVector}(train::T, test::T)
 end
 
 
+doNothing(train_scores::Vector, test_scores::Vector, preds::Matrix, combo_ix::Int64) = ()
+
+
 function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
-    agg::Function=meanTrainTest, states...)
+    on_combo_complete::Function=doNothing,
+    states...)
+  state_combos::Combos = stateCombos(states...)
+  evalModel(pipe, cvg, state_combos, on_combo_complete=on_combo_complete)
+end
 
-  all_combos::Combos = _evalInputToModelStates(states...)
 
-  preds = zeros(Float64, length(pipe.truths), length(all_combos))
+function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
+    state_combos::Combos;
+    on_combo_complete::Function=doNothing)
 
-  scores = map(enumerate(all_combos)) do (comboix_combo)
+  scores::Vector{Tuple} = map(state_combos |> enumerate) do comboix_combo
     combo_ix::Int64, combo::ModelState = comboix_combo
 
     modelState!(pipe, combo)
-    train_scores, test_scores, curr_preds = getTrainTestScores(pipe, cvg)
+    train_scores, test_scores, preds = trainTestPreds(pipe, cvg)
 
-    preds[:, combo_ix] = curr_preds
-    agg(train_scores, test_scores)
+    on_combo_complete(train_scores, test_scores, preds, combo_ix)
+
+    meanTrainTest(train_scores, test_scores)
   end
 
   train_scores = Float64[t[1] for t in scores]
   test_scores = Float64[t[2] for t in scores]
 
-  train_scores, test_scores, all_combos, preds
+  train_scores, test_scores, state_combos, preds
 end
 
 
-function stringifyLabels(labels::Vector{ModelState})
-  mkLabel(p::ParamState) = "$(p[1]): $(p[2])"
-
-  map(labels) do m::ModelState
-    @> map(mkLabel, m) join("; ")
-  end
+stringifyLabels(labels::Vector{ModelState}) = map(labels) do m::ModelState
+  @> map(p::ParamState -> "$(p[1]): $(p[2])", m) join("; ")
 end
 
 

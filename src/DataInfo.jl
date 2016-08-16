@@ -40,7 +40,7 @@ getIdIxs(di::DataInfo, ids::Ids) = map(
   id -> getIdIx(di, id), ids)
 
 
-typealias XY Tuple{Matrix{Float64}, Vector{Float64}}
+typealias XY Tuple{Matrix, Vector}
 function getXyMat(di::DataInfo, ids::Ids)
   data::DataFrame, predictors::Vector{Symbol}, covars::Vector{Symbol}, target_col::Symbol =
     getData(di)

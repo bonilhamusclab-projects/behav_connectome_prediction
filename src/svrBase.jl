@@ -10,6 +10,8 @@ include("mlHelpers.jl")
 
 @pyimport sklearn.svm as svm
 LinearSVR = svm.LinearSVR
+LinearSVC = svm.LinearSVC
+SVC = svm.SVC
 
 
 @memoize function getXyMat(o::Outcome,
@@ -76,9 +78,12 @@ end
 
 function getCvgGen(cvgT::Type, n_folds::Int64)
   @assert cvgT <: CrossValGenerator
+  function mkRandomSub(n_subjects::Int64, train_ratio::Float64=.8)
+    RandomSub(n_subjects, round(Int64, train_ratio * n_subjects), n_folds)
+  end
   @switch cvgT begin
-    Kfold; (n_samples::Int64) -> Kfold(n_samples, n_folds)
-    RandomSub; (n_samples::Int64) -> RandomSub(n_samples, round(Int64, .8 * n_samples), n_folds)
+    Kfold; (n_subjects::Int64) -> Kfold(n_subjects, n_folds)
+    RandomSub; mkRandomSub
   end
 end
 
@@ -151,48 +156,51 @@ end
 ratioToCount(ratio::Float64, n::Int64) = ratiosToCounts([ratio], n)[1]
 
 
-function getRepetitionSamplesGen(n_samples::Int64,
-  n_repetitions::Int64,
-  is_perm::Bool)
+function samplesGen(cvg::CrossValGenerator,
+                        sample_size::Int64,
+                        is_perm=false)
 
-  getRepetitionSamplesGen(1:n_samples, n_repetitions, is_perm)
+  all_samples = 1:sample_size
+
+  function shuffle(arr)
+    shuffle_ixs = @>> arr length randperm(MersenneTwister())
+    arr[shuffle_ixs]
+  end
+
+  typealias Inds Vector{Int64}
+  typealias XyInds Tuple{Inds, Inds}
+  typealias TrainTestInds Tuple{XyInds, XyInds}
+  cached_ixs::Array{TrainTestInds} = map(cvg) do x_train_ixs
+    x_test_ixs = setdiff(all_samples, x_train_ixs)
+
+    y_train_ixs, y_test_ixs = if is_perm
+      shuffle(x_train_ixs), shuffle(x_test_ixs)
+    else
+      x_train_ixs, x_test_ixs
+    end
+
+    trains::XyInds = (x_train_ixs, y_train_ixs)
+    tests::XyInds = (x_test_ixs, y_test_ixs)
+
+    TrainTestInds( (trains, tests) )
+  end
+
+  sample_ix::Int64 -> cached_ixs[sample_ix]
 end
 
 
-function getRepetitionSamplesGen(samples::AbstractVector,
-  n_repetitions::Int64,
-  is_perm::Bool)
+function crossValSamplesGen(cvg::CrossValGenerator,
+  sample_size::Int64)
 
-  n_samples::Int64 = length(samples)
+  all_samples = 1:sample_size
 
   typealias Inds Vector{Int64}
-  cached_perm_ixs::Array{Inds} = map(1:n_repetitions) do r
-    randperm(MersenneTwister(r), n_samples)
+  cached_cross_val_ixs::Array{Tuple{Inds, Inds}} = map(cvg) do train_ixs
+    test_ixs = setdiff(all_samples, train_ixs)
+    (train_ixs, test_ixs)
   end
 
-  getPermInds(repetition_ix, train_size) =(
-    cached_perm_ixs[repetition_ix][1:train_size],
-    cached_perm_ixs[repetition_ix][train_size+1:end]
-  )
-
-  typealias TrainTest Tuple{Inds, Inds}
-  cvg::CrossValGenerator = getCvg(RandomSub, n_repetitions, n_samples)
-  cached_pure_ixs::Array{TrainTest} = map(cvg) do train_inds::Inds
-    train_inds, setdiff(1:n_samples, train_inds)
-  end
-
-  function fn(repetition_ix::Int64)
-    (X_train::Inds, X_test::Inds) = cached_pure_ixs[repetition_ix]
-    (y_train::Inds, y_test::Inds) = if is_perm
-      ret = getPermInds(repetition_ix, length(X_train))
-      #TODO: Figure out why this is necessary
-      ret
-    else
-      X_train, X_test
-    end
-
-    (samples[X_train], samples[y_train]), (samples[X_test], samples[y_test])
-  end
+  repetition_ix::Int64 -> cached_cross_val_ixs[fit_ix]
 end
 
 
@@ -210,6 +218,7 @@ updateStateMeanStdGen(state::Dict) = Xy::XY -> begin
 
   state[:feature_means] = mean(X, 1)[:]
   state[:feature_stds] = std(X, 1)[:]
+  state[:variant_features] = state[:feature_stds] .> 1e-6
 
   Xy
 end
@@ -229,9 +238,9 @@ end
 
 selectVariantColsGen(state::Dict, run) = doSomethingGen(run) do Xy::XY
   X, y = Xy
-  variantCols = state[:feature_stds] .> 1e-6
+  variant_features = state[:variant_features]
 
-  X[:, variantCols], y
+  X[:, variant_features], y
 end
 
 
@@ -257,20 +266,20 @@ end
 reverseBiasGen(state::Dict, run) = y::Vector -> run ? y - state[:bias] : y
 
 
-function svrPipelineGen(di::DataInfo)
-  X, y = getXyMat(di)
-  svrPipelineGen(X, y)
-end
+svrPipeline(di::DataInfo) = svrPipeline(getXyMat(di)...)
 
 
-function svrPipelineGen(X::Matrix, y::Vector;
+svrPipeline(X::Matrix, y::Vector) = classifierPipeline(X, y)
+
+
+function classifierPipeline{T}(X::Matrix, y::Vector{T};
   normalize::Bool=false,
-  include_bias::Bool=false,
-  select_variant_cols::Bool=true)
+  select_variant_cols::Bool=true,
+  classifier::PyObject = LinearSVR(),
+  score_fn::Function = r2score
+  )
 
-  svr = LinearSVR()
-
-  state = Dict{Symbol, Any}(:svr => svr, :svr_C => svr[:C])
+  state = Dict{Symbol, Any}(:classifier => classifier, :C => classifier[:C])
 
   selectData(ixs::IXs; y_ixs::IXs=ixs) = X[ixs, :], y[y_ixs]
 
@@ -278,39 +287,36 @@ function svrPipelineGen(X::Matrix, y::Vector;
 
   normalizeData = normalizeDataGen(state, normalize)
 
-  offsetBias = offsetBiasGen(state, include_bias)
-  reverseBias = reverseBiasGen(state, include_bias)
-
   fit_fns::Functions = begin
-    updateStateBias! = updateStateBiasGen(state)
-
     updateStateMeanStd! = updateStateMeanStdGen(state)
 
-    function svrFit!(Xy::XY)
-      svr[:C] = state[:svr_C]
-      svr[:fit](Xy[1], Xy[2])
+    function classifierFit!(Xy::XY)
+      classifier[:C] = state[:C]
+      curr_X::Matrix = Xy[1]
+      curr_y::Vector{T} = Xy[2]
+      classifier[:fit](curr_X, curr_y)
     end
 
-    [selectData, updateStateBias!, updateStateMeanStd!,
-      normalizeData, selectVariantCols, offsetBias,
-      svrFit!]
+    [selectData, updateStateMeanStd!,
+      normalizeData, selectVariantCols,
+      classifierFit!]
   end
 
   predict_fns::Functions = begin
     onlyX(Xy::XY) = Xy[1]
-    mockY(X::Matrix) = (X, Float64[])
+    mockY(X::Matrix) = (X, T[])
 
     normalizeXdata(X::Matrix) = X |> mockY |> normalizeData |> onlyX
 
     selectVariantColsX(X::Matrix) = X |> mockY |> selectVariantCols |> onlyX
 
-    svrPredict(X::Matrix) = svr[:predict](X)
+    classifierPredict(X::Matrix) = classifier[:predict](X)
 
     [selectData, onlyX,
       normalizeXdata, selectVariantColsX,
-      svrPredict, reverseBias
+      classifierPredict
       ]
   end
 
-  Pipeline(fit_fns, predict_fns, r2score, y, state)
+  Pipeline(fit_fns, predict_fns, score_fn, y, state)
 end

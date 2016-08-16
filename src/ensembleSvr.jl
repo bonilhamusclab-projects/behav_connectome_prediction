@@ -11,22 +11,19 @@ include("optimizeHelpers.jl")
 include("svrBase.jl")
 
 
-function calcScoresGen(
-    X::Matrix{Float64}, y::Vector{Float64};
-    n_iters::Int64 = 10,
-    seed::Nullable{Int}=Nullable(1234))
+function calcScoresGen(pipe::Pipeline,
+  cvg::CrossValGenerator,
+  n_samples::Int64,
+  call_test::Bool=true)
 
-  n_samples = length(y)
-  cvg::CrossValGenerator = getCvg(RandomSub, n_iters, n_samples)
+  n_subjects = length(pipe.truths)
 
-  pipe::Pipeline = svrPipelineGen(X, y)
-
-  test(_, ixs::Vector{Int64}) = pipeTest(pipe, ixs)
+  test(_, ixs::Vector{Int64}) = call_test ? pipeTest(pipe, ixs) : -1.
 
   function calcScores(C::Float64)
-    paramState(pipe, :svr)[:C] = C
+    paramState!(pipe, :C => C)
 
-    train_scores = zeros(Float64, n_iters)
+    train_scores = zeros(Float64, n_samples)
     fit_call_count::Int64 = 0
     fit(ixs::IXs) = begin
       fit_call_count += 1
@@ -35,7 +32,7 @@ function calcScoresGen(
       train_scores[fit_call_count] = pipeTest(pipe, ixs)
     end
 
-    test_scores = cross_validate(fit, test, n_samples, cvg)
+    test_scores = cross_validate(fit, test, n_subjects, cvg)
 
     debug(@sprintf "C: %3.2e, test mean: %3.2e test T: %3.2e, train mean: %3.2e" C mean(test_scores) OneSampleTTest(test_scores).t mean(train_scores))
 
@@ -55,12 +52,15 @@ immutable CRange
 end
 
 
-function findOptimumC(X::Matrix{Float64}, y::Vector{Float64};
+function findOptimumC!(pipe::Pipeline, cvg_factory::Function;
                       c_range::Nullable{CRange} = Nullable{CRange}(),
                       score_train_scores::Function = mean,
-                      score_test_scores::Function = arr::AbstractVector{Float64} -> OneSampleTTest(arr).t
+                      score_test_scores::Function = arr -> OneSampleTTest(arr).t
                       )
-  calcScoresGenIters(n_iters) = calcScoresGen(X, y, n_iters=n_iters)
+  function calcSampleScoresGen(n_samples, train_ratio)
+    cvg = cvg_factory(n_samples, train_ratio, pipe.truths)
+    calcScoresGen(pipe, cvg, n_samples)
+  end
 
   min_C::Float64, max_C::Float64 = begin
     if !isnull(c_range)
@@ -68,30 +68,25 @@ function findOptimumC(X::Matrix{Float64}, y::Vector{Float64};
       c_range_val.min_x, c_range_val.max_x
     else
 
-      calc10Scores = calcScoresGenIters(10)
-      scoreTrainScores(C::Float64) = calc10Scores(C)[2] |> score_train_scores
+      calc10Scores = calcSampleScoresGen(10, .8)
+      trainScore(C::Float64) = calc10Scores(C)[2] |> score_train_scores
 
       min_score::Float64 = .2
       max_score::Float64 = .8
 
-      ret_max::Float64 = simpleNewton(scoreTrainScores, max_score,
-                                       5e-4, 5000.)
-
-      ret_min::Float64 = simpleNewton(scoreTrainScores, min_score,
-                                       5e-4, ret_max)
-
-
+      ret_max::Float64 = simpleNewton(trainScore, max_score,
+                                       5e-6, 5000.)
+      ret_min::Float64 = simpleNewton(trainScore, min_score,
+                                       5e-6, ret_max)
       ret_min, ret_max
     end
   end
 
+  calc50Scores = calcSampleScoresGen(50, .8)
+  testScore(C::Float64) = -1. * (calc50Scores(C)[1] |> score_test_scores)
+  C::Float64 = optimize(testScore, min_C, max_C, rel_tol=.1).minimum
 
-  calc50Scores = calcScoresGenIters(50)
-  getTestScores(C::Float64) = calc50Scores(C)[1]
-  getTestScoresT(C::Float64) = -1. * score_test_scores(getTestScores(C))
-  C::Float64 = optimize(getTestScoresT, min_C, max_C, rel_tol=.1).minimum
-
-  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset %s" C -1 * getTestScoresT(C) d)
+  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset %s" C -1 * testScore(C) d)
 
   (C, min_C, max_C)
 end
@@ -99,180 +94,213 @@ end
 
 typealias DataSetMap Dict{DataSet, Float64}
 
-function ensemble(outcome::Outcome,
+function runPipeline(X::Matrix,
+                  y::Vector,
+                  pipe::Pipeline,
                   get_C::Function,
-                  ids::Ids,
-                  getRepetitionIxs::Function,
-                  region::Region=left_select2;
-                  weights::DataSetMap = Dict(conn => .5, lesion => .5),
-                  n_repetitions::Int64=1000,
-                  seed::Nullable{Int}=Nullable(1234)
-                  )
+                  get_sample_ixs::Function;
+                  n_samples::Int64=1000)
 
-  @set_seed
+  predictions = repmat([NaN], length(y), n_samples)
 
-  ds::AbstractVector{DataSet} = weights |> keys |> collect
+  coefficients = zeros(Float64, size(X, 2), n_samples)
 
-  allDs(f::Function, T::Type) = Dict{DataSet, T}(
-    [d => f(d)::T for d in ds])
+  function fit!(x_train_ixs, y_train_ixs, sample_ix)
+    X_fit, y_fit = X[x_train_ixs, :], y[y_train_ixs]
+    C = get_C(X_fit, y_fit, sample_ix)
 
-  dis::Dict{DataSet, DataInfo} = allDs(DataInfo) do d::DataSet
-    DataInfo(outcome, diff_wpm, all_subjects, region, d)
+    paramState!(pipe, :C => C)
+    pipeFit!(pipe, x_train_ixs, y_train_ixs)
   end
 
-  XYs::Dict{DataSet, XY} = allDs(XY) do d
-    X, y =  getXyMat(dis[d], ids)
-    X, y
+  function test(x_test_ixs, y_test_ixs, sample_ix)
+    preds = predictions[y_test_ixs, sample_ix] = pipePredict(pipe,
+      x_test_ixs, y_test_ixs)
+
+    r2Score(y[y_test_ixs], preds)
   end
 
-  pipes::Dict{DataSet, Pipeline} = allDs(Pipeline) do d
-    X, y = XYs[d]
-    svrPipelineGen(X, y)
+  scores::Vector{Float64} = map(1:n_samples) do s::Int64
+    (x_train_ixs, y_train_ixs), (x_test_ixs, y_test_ixs) = get_sample_ixs(s)
+
+    fit!(x_train_ixs, y_train_ixs, s)
+
+    coefs = paramState(pipe, :classifier)[:coef_]
+    variant_features = paramState(pipe, :variant_features)
+    coefficients[variant_features, s] = coefs
+
+    test(x_test_ixs, y_test_ixs, s)
   end
 
-  function fit(repetition_ix::Int64)
-
-    (X_train_ixs::IXs, y_train_ixs::IXs) = getRepetitionIxs(repetition_ix)[1]
-
-    for (d, pipe) in pipes
-      X, y = XYs[d]
-      C = get_C(X[X_train_ixs, :], y[y_train_ixs], dis[d], repetition_ix)
-
-      paramState(pipe, :svr)[:C] = C
-      pipeFit!(pipe, X_train_ixs, y_train_ixs)
-    end
-
-  end
-
-  function test(repetition_ix)
-    (test_x_ixs::IXs, test_y_ixs::IXs) = getRepetitionIxs(repetition_ix)[2]
-    num_samples = length(test_x_ixs)
-    @assert num_samples == length(test_y_ixs)
-
-    predictions::Matrix{Float64} = begin
-      ret = zeros(Float64, num_samples, length(pipes))
-      for (ix::Int64, (d::DataSet, pipe::Pipeline)) in enumerate(pipes)
-        ret[:, ix] = pipePredict(pipe, test_x_ixs, test_y_ixs) .* weights[d]
-      end
-      ret
-    end
-
-    ensemble_predictions::Vector{Float64} = sum(predictions, 2)[:]
-
-    y::Vector{Float64} = begin
-      getY(Xy::XY) = Xy[2][test_y_ixs]
-
-      first_y::Vector{Float64} = XYs |> values |> first |> getY
-      @assert reduce(true, values(XYs)) do acc::Bool, Xy::XY
-        acc & (getY(Xy) == first_y)
-      end
-
-      first_y
-    end
-
-    @assert length(ensemble_predictions) == length(y)
-
-    r2Score(y, ensemble_predictions)
-  end
-
-  scores::Vector{Float64} = map(1:n_repetitions) do r::Int64
-    fit(r)
-    test(r)
-  end
-
-  scores
+  scores, predictions, coefficients
 end
 
 
 type State
-  setreps::Vector{Bool}
   cs::Vector{Float64}
   c_range::Nullable{CRange}
   getrepixs::Function
 end
 
-function State(n_repetitions::Int64)
-  State(zeros(Bool, n_repetitions),
-        zeros(Float64, n_repetitions),
+function State(n_samples::Int64)
+  State(zeros(Float64, n_samples),
         Nullable{CRange}(),
         i::Int64 -> error("not set yet")
         )
 end
 
 
-function findOptimumCandUpdateStateGen(state_map::Dict{DataInfo, State},
-  n_repetitions)
+function findOptimumCandUpdateStateGen(state::State,
+    pipe_factory::Function, cvg_factory::Function)
 
-  typealias CRangeMap Dict{DataInfo, Nullable{CRange}}
-  prev_range_map::CRangeMap = CRangeMap()
+  n_samples = state.cs |> length
 
-  function updateState!(di::DataInfo, repetition_ix::Int64,
+  function updateState!(sample_ix::Int64,
                         C::Float64, min_C::Float64, max_C::Float64)
-    state::State = get(state_map, di, State(n_repetitions))
-    state.setreps[repetition_ix] = true
 
-    prev_range::Nullable{CRange} = state.c_range
-    if isnull(prev_range)
-      state.c_range = Nullable(CRange(min_C/1.5, max_C*1.5))
+    if isnull(state.c_range)
+      state.c_range = @> CRange(min_C/1.5, max_C*1.5) Nullable
     end
 
-    state.cs[repetition_ix] = C
-
-    state_map[di] = state
-
+    state.cs[sample_ix] = C
   end
 
-  fn(X::Matrix{Float64}, y::Vector{Float64}, di, repetition_ix::Int64) = begin
-    state::State = get(state_map, di, State(n_repetitions))
-    if state.setreps[repetition_ix]
-      return state.cs[repetition_ix]
-    end
+  function findOptimumCandUpdateState(X::Matrix, y::Vector, sample_ix::Int64)
+    pipe = pipe_factory(X, y)
 
-    debug("datainfo: $di")
-    C::Float64, min_C::Float64, max_C::Float64 = findOptimumC(
-      X, y, c_range=state.c_range)
+    C::Float64, min_C::Float64, max_C::Float64 = findOptimumC!(
+      pipe, cvg_factory, c_range=state.c_range)
 
-    updateState!(di, repetition_ix, C, min_C, max_C)
+    updateState!(sample_ix, C, min_C, max_C)
     C
   end
 end
 
 
-function run(n_repetitions::Int64=1000, is_perm=false)
+function calcEnsemble(preds_lesion::Matrix, preds_conn::Matrix, truths::Vector;
+  weights::Dict{DataSet, Float64} = Dict(lesion=>.5, conn=>.5))
 
-  state_map::Dict{DataInfo, State} = Dict{DataInfo, State}()
+  @assert size(preds_conn) == size(preds_lesion)
 
-  get_C!::Function = findOptimumCandUpdateStateGen(state_map, n_repetitions)
+  n_samples = size(preds_lesion, 2)
 
-  mkDi(ds::DataSet) = DataInfo(adw, diff_wpm, all_subjects, left_select2, ds)
-  conn_di, lesion_di = @>> [conn, lesion] map(mkDi)
+  preds = repmat([NaN], size(preds_conn)...)
+  r2s = zeros(Float64, n_samples)
 
-  common_ids::Ids = getCommonIds([conn_di, lesion_di])
+  for s in 1:n_samples
+    lesion_ixs = [!isnan(i) for i in preds_lesion[:, s]]
+    conn_ixs = [!isnan(i) for i in preds_conn[:, s]]
 
-  getrepixs = getRepetitionSamplesGen(length(common_ids),
-    n_repetitions, is_perm)
+    @assert lesion_ixs == conn_ixs
 
-  pred(weights::Dict{DataSet, Float64}) = ensemble(adw, get_C!, common_ids,
-                                                   getrepixs,
-                                                   weights=weights,
-                                                   n_repetitions=n_repetitions
-                                                   )
+    preds[conn_ixs, s] = preds_lesion[lesion_ixs, s] .* weights[lesion] +
+      preds_conn[conn_ixs, s] .* weights[conn]
 
-  println("predicting ensemble")
-  pred_55 = pred(Dict(conn => .5, lesion => .5))
+    r2s[s] = r2score(truths[conn_ixs], preds[conn_ixs, s])
+  end
+
+  r2s, preds
+end
+
+
+function runRegress(n_samples::Int64=100, is_perm=false; target::Target=diff_wpm)
+
+  state_map::Dict{DataSet, State} = Dict{DataSet, State}(
+    conn => State(n_samples), lesion => State(n_samples))
+
+  conn_di, lesion_di = map([conn, lesion]) do ds::DataSet
+    DataInfo(adw, target, all_subjects, left_select2, ds)
+  end
+
+  x_conn, x_lesion, y = begin
+    common_ids = getCommonIds([conn_di, lesion_di])
+
+    x_conn, y_conn = getXyMat(conn_di, common_ids)
+    x_lesion, y_lesion = getXyMat(lesion_di, common_ids)
+
+    @assert y_conn == y_lesion
+
+    x_conn, x_lesion, y_conn
+  end
+
+  x_map = Dict{DataSet, Matrix}(conn=>x_conn, lesion=>x_lesion)
+
+  sample_size = length(y)
+
+  function cvgFactory(n_samples, train_ratio, ys)
+    sample_size = length(ys)
+    getCvgGen(RandomSub, n_samples)(sample_size, train_ratio)
+  end
+
+  get_sample_ixs = @> n_samples cvgFactory(.8, y) samplesGen(sample_size, is_perm)
+
+  function preds(ds::DataSet)
+    state = state_map[ds]
+    get_C! = findOptimumCandUpdateStateGen(state, svrPipeline, cvgFactory)
+
+    x::Matrix = x_map[ds]
+
+    runPipeline(x,
+      y,
+      svrPipeline(x, y),
+      get_C!,
+      get_sample_ixs,
+      n_samples=n_samples)
+  end
 
   println("predicting lesion")
-  pred_lesion = pred(Dict(lesion => 1.))
+  r2s_lesion, preds_lesion, coefs_lesion = preds(lesion)
 
-  println("predicting connection")
-  pred_conn = pred(Dict(conn => 1.))
+  println("predicting connectivity")
+  r2s_conn, preds_conn, coefs_conn = preds(conn)
+
+  println("predicting ensemble")
+  r2s_55, preds_ens = calcEnsemble(preds_lesion, preds_conn, y)
 
   ret = Dict()
-  ret[:preds] = Dict(:55 => pred_55, :conn => pred_conn, :lesion => pred_lesion)
-  ret[:state] = state_map
+  ret[:r2s] = Dict(:55 => r2s_55, :conn => r2s_conn, :lesion => r2s_lesion)
+  ret[:state] = Dict(conn_di => state_map[conn], lesion_di => state_map[lesion])
+  ret[:preds] = Dict(:55=>preds_ens, :conn=>preds_conn, :lesion=>preds_lesion)
+  ret[:coefs] = Dict(:conn => coefs_conn, :lesion => coefs_lesion)
 
   ret[:ids] = common_ids
-  ret[:getrepixs] = getrepixs
+  ret[:get_sample_ixs] = get_sample_ixs
+
+  ret
+end
+
+
+function runClass(n_samples::Int64=100, is_perm=false)
+  ret = runRegress(n_samples, is_perm, target=diff_wps)
+
+  println("classification")
+
+  #training with regression model created more accurate coefficients
+  ret[:preds_binary] = [k => [isnan(i) ? NaN : i > 0 for i in v]
+    for (k, v) in ret[:preds]]
+
+  y = begin
+    mkDi(ds) = DataInfo(adw, diff_wps, all_subjects, left_select2, ds)
+
+    conn_di, lesion_di = map(mkDi, [conn, lesion])
+    common_ids = getCommonIds([conn_di, lesion_di])
+
+    _, y_conn = getXyMat(conn_di, common_ids)
+    _, y_lesion = getXyMat(lesion_di, common_ids)
+
+    @assert y_conn == y_lesion
+
+    y_conn
+  end
+
+  function calcF1(preds, sample_ix::Int64)
+    (_, y_test_ixs) = ret[:get_sample_ixs](sample_ix)[2]
+    curr_preds = preds[y_test_ixs] |> BitVector
+    f1score(y[y_test_ixs] .> 0, curr_preds)
+  end
+
+  ret[:f1s] = [k => map(sample_ix -> calcF1(preds, sample_ix), 1:n_samples)
+    for (k, preds) in ret[:preds_binary]]
 
   ret
 end

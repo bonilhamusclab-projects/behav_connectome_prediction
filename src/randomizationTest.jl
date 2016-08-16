@@ -7,16 +7,13 @@ function randomizationTest(compare_fn,
   truths::AbstractVector, perms::AbstractVector;
   num_tests=1000)
 
-  concats = [truths perms]
+  concats = [truths; perms]
   num_samples = length(concats)
   num_truths = length(truths)
-  num_perms = length(perms)
 
   map(1:num_tests) do i
     sampled_data = @> concats sample(num_samples, replace=false)
-    mock_truths = sampled_data[1:num_truths]
-    mock_perms = sampled_data[num_truths+1:end]
-    compare_fn(mock_truths, mock_perms)
+    compare_fn(sampled_data[1:num_truths], sampled_data[num_truths+1:end])
   end
 end
 
