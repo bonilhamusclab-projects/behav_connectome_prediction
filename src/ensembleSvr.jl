@@ -333,6 +333,37 @@ function runClass(n_samples::Int64=100, is_perm=false)
 end
 
 
+function calcCoefStats(coefs_df::DataFrame)
+  coefs_df_long = @> coefs_df melt rename!(:variable, :predictor)
+
+  groupByPred(fn, s) = @> coefs_df_long by(:predictor, df -> fn(df[:value])) rename!(:x1, s)
+
+  n_samples = size(coefs_df, 1)
+
+  mean_df = groupByPred(mean, :mean)
+  standard_dev_df = groupByPred(std, :standard_dev)
+
+  pos_ratio = groupByPred(vs -> (sum(vs .> 0)+1)/(n_samples+1), :pos_ratio)
+  neg_ratio = groupByPred(vs -> (sum(vs .< 0)+1)/(n_samples+1), :neg_ratio)
+
+  ret = @>> mean_df begin
+    join(standard_dev_df, on=:predictor)
+    join(pos_ratio, on=:predictor)
+    join(neg_ratio, on=:predictor)
+  end
+
+  ret[:pos_ratio_adj] = padjust(ret[:pos_ratio], BenjaminiHochberg)
+  ret[:neg_ratio_adj] = padjust(ret[:neg_ratio], BenjaminiHochberg)
+
+  ret
+end
+
+
+predAvg(preds_matrix) = map(1:size(preds_matrix, 1)) do r
+  preds_matrix[r, :] |> dropnan |> mean
+end
+
+
 function saveRunClass(run_class_ret::Dict;
   target::Target=diff_wps, score_fn::Symbol=:accuracies)
 
@@ -357,13 +388,14 @@ function saveRunClass(run_class_ret::Dict;
   end
 
   for (k, v) in run_class_ret[:preds_continuous]
-    @> "preds_continuous_$(k).csv" destF writecsv(v)
+    @> "predictions_continuous_$(k).csv" destF writecsv(v)
   end
 
   for (k, v) in run_class_ret[:coefs]
     predictors = @> k == :conn ? conn_predictors : lesion_predictors
     df = @> v' DataFrame d -> rename!(d, names(d), predictors)
     @> "predictors_$(k).csv" destF writetable(df)
+    @> "predictors_stats_$(k).csv" destF writetable(calcCoefStats(df))
   end
 
   @> "ids.csv" destF writecsv(run_class_ret[:ids])
