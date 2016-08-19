@@ -4,6 +4,7 @@ using Lazy
 using Logging
 using MLBase
 using Optim
+using PValueAdjust
 
 include("DataInfo.jl")
 include("helpers.jl")
@@ -365,13 +366,16 @@ end
 
 
 function saveRunClass(run_class_ret::Dict;
-  target::Target=diff_wps, score_fn::Symbol=:accuracies)
+  target::Target=diff_wps,
+  score_fn::Symbol=:accuracies,
+  is_perm::Bool=false)
 
   datasetToDataInfo(ds::DataSet) = DataInfo(
     adw, target, all_subjects, left_select2, ds)
 
   dest_dir = @> data_dir() joinpath("step4", "svr_classify")
-  destF(f_name) = joinpath(dest_dir, f_name)
+  destF(f_name) = joinpath(dest_dir,
+    is_perm ? "perm_$(f_name)" : f_name)
 
   conn_di = datasetToDataInfo(conn)
   lesion_di = datasetToDataInfo(lesion)
