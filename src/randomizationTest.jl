@@ -11,24 +11,25 @@ function randomizationTest(compare_fn,
   num_samples = length(concats)
   num_truths = length(truths)
 
-  map(1:num_tests) do i
+  actual = compare_fn(truths, perms)
+
+  tests = map(1:num_tests) do i
     sampled_data = @> concats sample(num_samples, replace=false)
     compare_fn(sampled_data[1:num_truths], sampled_data[num_truths+1:end])
   end
+
+  p_pos = sum([s <= actual for s in tests])/num_tests
+
+  p_pos, actual, tests
 end
 
 
 function diffInMeans(truths::AbstractVector, perms::AbstractVector;
   num_tests = 1000)
 
-  meanDiff(a1, a2) = mean(a1) - mean(a2)
+  meanDiff(arr1, arr2) = mean(arr1) - mean(arr2)
 
-  actual = meanDiff(truths, perms)
-  tests = randomizationTest(meanDiff, truths, perms, num_tests=num_tests)
-
-  p_pos = sum([s <= actual for s in tests])/num_tests
-
-  return p_pos, actual, tests
+  randomizationTest(meanDiff, truths, perms)
 end
 
 
@@ -59,4 +60,18 @@ function diffInMeans(coefs::DataFrame;
   end
 
   diffInMeans(coefs, perm_coefs, num_tests=num_tests)
+end
+
+
+function permutationPvalAvg(reals, perms)
+  sorted_perms = sort(perms)
+  n_perms = length(perms)
+
+  rank(r, ix=1) = if (ix > n_perms) || (r < sorted_perms[ix])
+    ix - 1
+  else
+    rank(r, ix+1)
+  end
+
+  @>> reals map(r -> (rank(r) + 1)/(n_perms + 1)) mean
 end
