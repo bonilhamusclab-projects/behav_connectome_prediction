@@ -15,9 +15,9 @@ include("svrBase.jl")
 
 function calcScoresGen(pipe::Pipeline,
   cvg::CrossValGenerator,
-  n_samples::Int64,
   call_test::Bool=true)
 
+  n_samples = length(cvg)
   n_subjects = length(pipe.truths)
 
   test(_, ixs::Vector{Int64}) = call_test ? pipeTest(pipe, ixs) : -1.
@@ -43,65 +43,14 @@ function calcScoresGen(pipe::Pipeline,
 end
 
 
-immutable CRange
-  min_x::Float64
-  max_x::Float64
-
-  CRange(min_x::Float64, max_x::Float64) = begin
-    @assert min_x <= max_x
-    new(min_x, max_x)
-  end
-end
-
-
 function findOptimumC!(pipe::Pipeline, cvg_factory::Function;
-                      c_range::Nullable{CRange} = Nullable{CRange}(),
-                      score_train_scores::Function = mean,
-                      score_test_scores::Function = arr -> OneSampleTTest(arr).t
-                      )
-  function calcSampleScoresGen(n_samples, train_ratio)
-    cvg = cvg_factory(n_samples, train_ratio, pipe.truths)
-    calcScoresGen(pipe, cvg, n_samples)
-  end
-
-  min_C::Float64, max_C::Float64 = begin
-    if !isnull(c_range)
-      c_range_val::CRange = get(c_range)
-      c_range_val.min_x, c_range_val.max_x
-    else
-
-      calc10Scores = calcSampleScoresGen(10, .8)
-      trainScore(C::Float64) = calc10Scores(C)[2] |> score_train_scores
-
-      min_score::Float64 = .2
-      max_score::Float64 = .8
-
-      ret_max::Float64 = simpleNewton(trainScore, max_score,
-                                       5e-6, 5000.)
-      ret_min::Float64 = simpleNewton(trainScore, min_score,
-                                       5e-6, ret_max)
-      ret_min, ret_max
-    end
-  end
-
-  calc50Scores = calcSampleScoresGen(50, .8)
-  testScore(C::Float64) = -1. * (calc50Scores(C)[1] |> score_test_scores)
-  C::Float64 = optimize(testScore, min_C, max_C, rel_tol=.1).minimum
-
-  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset %s" C -1 * testScore(C) d)
-
-  (C, min_C, max_C)
-end
-
-
-function findOptimumCgrid!(pipe::Pipeline, cvg_factory::Function;
                       score_train_scores::Function = mean,
                       score_test_scores::Function = arr -> OneSampleTTest(arr).t,
                       c_grid::AbstractVector = [logspace(-6, 2, 9); logspace(-6, 2, 9).*5]
                       )
   function calcSampleScoresGen(n_samples, train_ratio)
     cvg = cvg_factory(n_samples, train_ratio, pipe.truths)
-    calcScoresGen(pipe, cvg, n_samples)
+    calcScoresGen(pipe, cvg)
   end
 
   calc30Scores = calcSampleScoresGen(30, .8)
@@ -116,7 +65,7 @@ function findOptimumCgrid!(pipe::Pipeline, cvg_factory::Function;
 
   info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset %s" C -1 * testScore(C) d)
 
-  (C, minimum(c_grid), maximum(c_grid))
+  C
 end
 
 
@@ -164,44 +113,28 @@ end
 
 type State
   cs::Vector{Float64}
-  c_range::Nullable{CRange}
   getrepixs::Function
 end
 
-function State(n_samples::Int64)
-  State(zeros(Float64, n_samples),
-        Nullable{CRange}(),
-        i::Int64 -> error("not set yet")
-        )
-end
+State(n_samples::Int64) = State(
+  zeros(Float64, n_samples),
+  i::Int64 -> error("not set yet")
+)
 
 
 function findOptimumCandUpdateStateGen(state::State,
-    pipe_factory::Function, cvg_factory::Function;
-    grid_search::Bool=false)
+    pipe_factory::Function, cvg_factory::Function)
 
   n_samples = state.cs |> length
 
-  function updateState!(sample_ix::Int64,
-                        C::Float64, min_C::Float64, max_C::Float64)
-
-#=    if isnull(state.c_range)
-      state.c_range = @> CRange(min_C/1.5, max_C*1.5) Nullable
-    end=#
-
-    state.cs[sample_ix] = C
-  end
+  updateState!(sample_ix::Int64, C::Float64) = state.cs[sample_ix] = C
 
   function findOptimumCandUpdateState(X::Matrix, y::Vector, sample_ix::Int64)
     pipe = pipe_factory(X, y)
 
-    C::Float64, min_C::Float64, max_C::Float64 = if grid_search
-      findOptimumCgrid!(pipe, cvg_factory)
-    else
-      findOptimumC!(pipe, cvg_factory, c_range=state.c_range)
-    end
+    C::Float64 = findOptimumC!(pipe, cvg_factory)
 
-    updateState!(sample_ix, C, min_C, max_C)
+    updateState!(sample_ix, C)
     C
   end
 end
@@ -233,7 +166,15 @@ function calcEnsemble(preds_lesion::Matrix, preds_conn::Matrix, truths::Vector;
 end
 
 
-function runClass(n_samples::Int64=100, is_perm=false)
+looFactory(n_samples, train_ratio, ys) = @> ys length LOOCV
+stratifiedRandomSubFactory(n_samples, train_ratio, ys) = StratifiedRandomSub(
+  ys .> 0, round(Int64, length(ys) * train_ratio), n_samples)
+
+
+function runClass(n_samples::Int64;
+  cvg_factory=looFactory,
+  find_c_cvg_factory=cvg_factory,
+  y_ixs::Nullable{Vector{Int64}}=Nullable{Vector{Int64}}())
 
   state_map::Dict{DataSet, State} = Dict{DataSet, State}(
     conn => State(n_samples), lesion => State(n_samples))
@@ -242,26 +183,22 @@ function runClass(n_samples::Int64=100, is_perm=false)
     DataInfo(adw, diff_wps, all_subjects, left_select2, ds)
   end
 
+  common_ids = getCommonIds([conn_di, lesion_di])
   x_conn, x_lesion, y = begin
-    common_ids = getCommonIds([conn_di, lesion_di])
 
     x_conn, y_conn = getXyMat(conn_di, common_ids)
     x_lesion, y_lesion = getXyMat(lesion_di, common_ids)
 
     @assert y_conn == y_lesion
 
-    x_conn, x_lesion, y_conn
+    x_conn, x_lesion, y_conn[get(y_ixs, 1:end)]
   end
 
   x_map = Dict{DataSet, Matrix}(conn=>x_conn, lesion=>x_lesion)
 
   sample_size = length(y)
 
-  function cvgFactory(n_samples, train_ratio, ys)
-    StratifiedRandomSub(ys .>= 0, round(Int64, length(ys) * train_ratio), n_samples)
-  end
-
-  get_sample_ixs = @> n_samples cvgFactory(.8, y) samplesGen(sample_size, is_perm)
+  get_sample_ixs = @> n_samples cvg_factory(.8, y) samplesGen(sample_size)
 
   function catPipeline(X, y, on_continuous_pred_calc=(arr, ixs, p)->())
     pipe = svrPipeline(X, y)
@@ -278,8 +215,7 @@ function runClass(n_samples::Int64=100, is_perm=false)
 
   function preds(ds::DataSet)
     state = state_map[ds]
-    get_C! = findOptimumCandUpdateStateGen(state, catPipeline, cvgFactory,
-      grid_search=true)
+    get_C! = findOptimumCandUpdateStateGen(state, catPipeline, find_c_cvg_factory)
 
     updatePredsMap!(preds, ixs, p) = continuous_preds_map[ds][ixs, p] = preds
 
