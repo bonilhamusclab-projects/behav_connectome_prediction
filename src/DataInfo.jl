@@ -64,6 +64,15 @@ function getXyMat(di::DataInfo)
 end
 
 
+function getXyMat(o::Outcome,
+                    target::Target;
+                    dataset::DataSet=conn,
+                    region::Region=full_brain,
+                    subject_group::SubjectGroup=all_subjects)
+  getXyMat(DataInfo(o, target, subject_group, region, dataset))
+end
+
+
 to_string(d::DataInfo) = join(
   ["$(d.outcome)_$(d.subject_group)_$(d.region)_$(d.target)_$(d.dataset)"; getCovars(d)],
   "_cv_")

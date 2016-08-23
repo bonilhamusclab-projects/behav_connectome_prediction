@@ -6,11 +6,9 @@ using MLBase
 using Optim
 using PValueAdjust
 
-include("DataInfo.jl")
-include("helpers.jl")
-include("optimizeHelpers.jl")
-include("svrClassify.jl")
-include("svrBase.jl")
+@everywhere include("DataInfo.jl")
+@everywhere include("helpers.jl")
+@everywhere include("svrPipe.jl")
 
 
 function calcScoresGen(pipe::Pipeline,
@@ -125,8 +123,6 @@ State(n_samples::Int64) = State(
 function findOptimumCandUpdateStateGen(state::State,
     pipe_factory::Function, cvg_factory::Function)
 
-  n_samples = state.cs |> length
-
   updateState!(sample_ix::Int64, C::Float64) = state.cs[sample_ix] = C
 
   function findOptimumCandUpdateState(X::Matrix, y::Vector, sample_ix::Int64)
@@ -169,6 +165,48 @@ end
 looFactory(n_samples, train_ratio, ys) = @> ys length LOOCV
 stratifiedRandomSubFactory(n_samples, train_ratio, ys) = StratifiedRandomSub(
   ys .> 0, round(Int64, length(ys) * train_ratio), n_samples)
+
+
+function runPermsLoo(n_perms; sample_size=50)
+  initDist() = zeros(Float64, n_perms)
+
+  dist = [k => initDist() for k in [:ens, :conn, :lesion]]
+
+  accuracies = map(1:n_perms) do i
+    println("perm number: $i")
+    y_ixs = @> sample_size randperm Nullable
+    res = runClass(sample_size, y_ixs=y_ixs)
+
+    for (k, v) in res[:accuracies]
+      dist[k][i] = sum(v)
+    end
+  end
+
+  dist
+end
+
+
+function samplesGen(cvg::CrossValGenerator,
+                        sample_size::Int64)
+
+  all_samples = 1:sample_size
+
+  typealias Inds Vector{Int64}
+  typealias XyInds Tuple{Inds, Inds}
+  typealias TrainTestInds Tuple{XyInds, XyInds}
+  cached_ixs::Array{TrainTestInds} = map(cvg) do x_train_ixs
+    x_test_ixs = setdiff(all_samples, x_train_ixs)
+
+    y_train_ixs, y_test_ixs = x_train_ixs, x_test_ixs
+
+    trains::XyInds = (x_train_ixs, y_train_ixs)
+    tests::XyInds = (x_test_ixs, y_test_ixs)
+
+    TrainTestInds( (trains, tests) )
+  end
+
+  sample_ix::Int64 -> cached_ixs[sample_ix]
+end
 
 
 function runClass(n_samples::Int64;
@@ -295,6 +333,8 @@ function calcCoefStats(coefs_df::DataFrame)
   ret
 end
 
+
+dropnan(arr) = arr[Bool[!isnan(i) for i in arr]]
 
 predAvg(preds_matrix) = map(1:size(preds_matrix, 1)) do r
   preds_matrix[r, :] |> dropnan |> mean
