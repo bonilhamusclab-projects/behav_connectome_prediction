@@ -365,23 +365,30 @@ predAvg(preds_matrix) = map(1:size(preds_matrix, 1)) do r
 end
 
 
+function coefsTable(run_class_ret, k::DataSet, target=diff_wps)
+  predictors = @>> k DataInfo(adw, target, all_subjects, left_select2) getPredictors
+  v = run_class_ret[:coefs][Symbol(k)]
+  @> v' DataFrame d -> rename!(d, names(d), predictors)
+end
+
+
+function coefsTable(run_class_ret, k::Symbol, target=diff_wps)
+  ds::DataSet = k == :conn ? conn : lesion
+  coefsTable(run_class_ret, ds, target)
+end
+
+
 function saveRunClass(run_class_ret::Dict;
   target::Target=diff_wps,
   score_fn::Symbol=:accuracies,
-  is_perm::Bool=false)
+  prefix::ASCIIString="")
 
   datasetToDataInfo(ds::DataSet) = DataInfo(
     adw, target, all_subjects, left_select2, ds)
 
   dest_dir = @> data_dir() joinpath("step4", "svr_classify")
   destF(f_name) = joinpath(dest_dir,
-    is_perm ? "perm_$(f_name)" : f_name)
-
-  conn_di = datasetToDataInfo(conn)
-  lesion_di = datasetToDataInfo(lesion)
-
-  conn_predictors = getPredictors(conn_di)
-  lesion_predictors = getPredictors(lesion_di)
+    isempty(prefix) ?  f_name : "$(prefix)_$(f_name)")
 
   for (k, v) in run_class_ret[:accuracies]
     @> "accuracies_$(k).csv" destF writecsv(v)
@@ -395,9 +402,8 @@ function saveRunClass(run_class_ret::Dict;
     @> "predictions_continuous_$(k).csv" destF writecsv(v)
   end
 
-  for (k, v) in run_class_ret[:coefs]
-    predictors = @> k == :conn ? conn_predictors : lesion_predictors
-    df = @> v' DataFrame d -> rename!(d, names(d), predictors)
+  for (k::Symbol, v) in run_class_ret[:coefs]
+    df = coefsTable(run_class_ret, k)
     @> "predictors_$(k).csv" destF writetable(df)
     @> "predictors_stats_$(k).csv" destF writetable(calcCoefStats(df))
   end
