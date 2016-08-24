@@ -202,9 +202,10 @@ stringifyLabels(labels::Vector{ModelState}) = map(labels) do m::ModelState
 end
 
 
-function scoresLayer(scores, clr, x)
+function scoresLayer(scores, clr, x; include_smooth=true)
   color = "colorant\"$clr\"" |> parse |> eval
-  layer(y=scores, x=x, Geom.point, Geom.smooth, Theme(default_color=color))
+  geoms = include_smooth ? (Geom.point, Geom.smooth) : (Geom.point,)
+  layer(y=scores, x=x, Theme(default_color=color), geoms...)
 end
 
 
@@ -212,7 +213,7 @@ function plotPreds(truths, preds::Vector, subjects)
   perm_ixs = sortperm(truths)
 
   plot(scoresLayer(truths[perm_ixs], "deepskyblue", subjects[perm_ixs]),
-   scoresLayer(preds[perm_ixs], "green", subjects[perm_ixs]),
+   scoresLayer(preds[perm_ixs], "green", subjects[perm_ixs], include_smooth=false),
    Guide.xlabel("Subject"),
    Guide.ylabel("Score"))
 end
