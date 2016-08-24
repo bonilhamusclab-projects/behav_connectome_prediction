@@ -336,10 +336,16 @@ end
 
 dropnan(arr) = arr[Bool[!isnan(i) for i in arr]]
 
-predAvg(preds_matrix) = map(1:size(preds_matrix, 1)) do r
-  preds_matrix[r, :] |> dropnan |> mean
+
+predAgg(agg_fn, preds_matrix) = map(1:size(preds_matrix, 1)) do r
+  preds_matrix[r, :] |> dropnan |> agg_fn
 end
 
+predAvg(preds_matrix) = predAgg(mean, preds_matrix)
+
+predStdErrs(preds_matrix) = predAgg(preds_matrix) do v
+  std(v)/(v |> length |> sqrt)
+end
 
 function coefsTable(run_class_ret, k::DataSet, target=diff_wps)
   predictors = @>> k DataInfo(adw, target, all_subjects, left_select2) getPredictors

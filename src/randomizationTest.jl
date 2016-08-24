@@ -63,7 +63,7 @@ function diffInMeans(coefs::DataFrame;
 end
 
 
-function permutationPvalAvg(reals, perms)
+function permutationPvalAvg(reals, perms; agg=mean)
   sorted_perms = sort(perms)
   n_perms = length(perms)
 
@@ -73,5 +73,5 @@ function permutationPvalAvg(reals, perms)
     rank(r, ix+1)
   end
 
-  @>> reals map(r -> (rank(r) + 1)/(n_perms + 1)) mean
+  @>> reals map(r -> (rank(r) + 1)/(n_perms + 1)) agg
 end
