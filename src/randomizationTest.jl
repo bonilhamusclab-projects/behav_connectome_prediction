@@ -29,7 +29,7 @@ function diffInMeans(truths::AbstractVector, perms::AbstractVector;
 
   meanDiff(arr1, arr2) = mean(arr1) - mean(arr2)
 
-  randomizationTest(meanDiff, truths, perms)
+  randomizationTest(meanDiff, truths, perms, num_tests=num_tests)
 end
 
 
