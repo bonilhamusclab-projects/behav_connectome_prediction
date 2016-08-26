@@ -308,20 +308,6 @@ calcCorrelations(dataf::DataFrame, predictors::Vector{Symbol},
   end
 
 
-macro l2_from_true(x)
-  :(sum( (y_true - $x).^2))
-end
-
-
-function r2Score{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T})
-
-  numerator::Float64 = @l2_from_true y_pred
-  denominator::Float64 = @l2_from_true mean(y_true)
-
-  1 - numerator/denominator
-end
-
-
 function accuracy{T <: Real}(y_true::AbstractVector{T}, y_pred::AbstractVector{T})
   @assert length(y_true) == length(y_pred)
   sum(y_true .== y_pred)/length(y_true)
