@@ -74,6 +74,7 @@ function runPipeline(X::Matrix,
                   pipe::Pipeline,
                   get_C::Function,
                   get_sample_ixs::Function;
+                  y_perm_ixs::Matrix = repmat(1:length(y), 1, n_samples),
                   n_samples::Int64=1000)
 
   coefficients = zeros(Float64, size(X, 2), n_samples)
@@ -94,15 +95,15 @@ function runPipeline(X::Matrix,
       prev_show = s
       println("at $s out of $(n_samples)")
     end
-    (x_train_ixs, y_train_ixs), (x_test_ixs, y_test_ixs) = get_sample_ixs(s)
+    train_ixs, test_ixs = get_sample_ixs(s)
 
-    fit!(x_train_ixs, y_train_ixs, s)
+    fit!(train_ixs, y_perm_ixs[train_ixs, s], s)
 
     coefs = paramState(pipe, :classifier)[:coef_]
     variant_features = paramState(pipe, :variant_features)
     coefficients[variant_features, s] = coefs
 
-    test(x_test_ixs, y_test_ixs)
+    test(test_ixs, y_perm_ixs[test_ixs, s])
   end
 
   scores, coefficients
@@ -167,22 +168,12 @@ stratifiedRandomSubFactory(n_samples, train_ratio, ys) = StratifiedRandomSub(
   ys .> 0, round(Int64, length(ys) * train_ratio), n_samples)
 
 
-function runPermsLoo(n_perms; sample_size=50)
-  initDist() = zeros(Float64, n_perms)
-
-  dist = [k => initDist() for k in [:ens, :conn, :lesion]]
-
-  accuracies = map(1:n_perms) do i
-    println("perm number: $i")
-    y_ixs = @> sample_size randperm Nullable
-    res = runClass(sample_size, y_ixs=y_ixs)
-
-    for (k, v) in res[:accuracies]
-      dist[k][i] = sum(v)
-    end
+function runPerms(n_perms; sample_size=50)
+  y_perm_ixs = zeros(Int64, sample_size, n_perms)
+  for c in 1:n_perms
+    y_perm_ixs[:, c] = randperm(sample_size)
   end
-
-  dist
+  runClass(n_perms, y_perm_ixs=Nullable(y_perm_ixs))
 end
 
 
@@ -192,17 +183,11 @@ function samplesGen(cvg::CrossValGenerator,
   all_samples = 1:sample_size
 
   typealias Inds Vector{Int64}
-  typealias XyInds Tuple{Inds, Inds}
-  typealias TrainTestInds Tuple{XyInds, XyInds}
-  cached_ixs::Array{TrainTestInds} = map(cvg) do x_train_ixs
-    x_test_ixs = setdiff(all_samples, x_train_ixs)
+  typealias TrainTestInds Tuple{Inds, Inds}
+  cached_ixs::Array{TrainTestInds} = map(cvg) do train_ixs
+    test_ixs = setdiff(all_samples, train_ixs)
 
-    y_train_ixs, y_test_ixs = x_train_ixs, x_test_ixs
-
-    trains::XyInds = (x_train_ixs, y_train_ixs)
-    tests::XyInds = (x_test_ixs, y_test_ixs)
-
-    TrainTestInds( (trains, tests) )
+    train_ixs, test_ixs
   end
 
   sample_ix::Int64 -> cached_ixs[sample_ix]
@@ -210,9 +195,9 @@ end
 
 
 function runClass(n_samples::Int64;
-  cvg_factory=looFactory,
-  find_c_cvg_factory=cvg_factory,
-  y_ixs::Nullable{Vector{Int64}}=Nullable{Vector{Int64}}())
+  cvg_factory=stratifiedRandomSubFactory,
+  find_c_cvg_factory=looFactory,
+  y_perm_ixs::Nullable{Matrix{Int64}}=Nullable{Matrix{Int64}}())
 
   state_map::Dict{DataSet, State} = Dict{DataSet, State}(
     conn => State(n_samples), lesion => State(n_samples))
@@ -229,7 +214,7 @@ function runClass(n_samples::Int64;
 
     @assert y_conn == y_lesion
 
-    x_conn, x_lesion, y_conn[get(y_ixs, 1:end)]
+    x_conn, x_lesion, y_conn
   end
 
   x_map = Dict{DataSet, Matrix}(conn=>x_conn, lesion=>x_lesion)
@@ -264,7 +249,9 @@ function runClass(n_samples::Int64;
       catPipeline(x, y, updatePredsMap!),
       get_C!,
       get_sample_ixs,
-      n_samples=n_samples)
+      n_samples=n_samples,
+      y_perm_ixs=get(y_perm_ixs, repmat(1:length(y), 1, n_samples))
+      )
   end
 
   println("predicting lesion")
