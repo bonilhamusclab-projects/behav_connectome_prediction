@@ -73,7 +73,7 @@ function runPipeline(X::Matrix,
                   y::Vector,
                   pipe::Pipeline,
                   get_C::Function,
-                  get_sample_ixs::Function;
+                  train_test_ixs::Vector{TrainTestInds};
                   y_perm_ixs::Matrix = repmat(1:length(y), 1, n_samples),
                   n_samples::Int64=1000)
 
@@ -95,7 +95,7 @@ function runPipeline(X::Matrix,
       prev_show = s
       println("at $s out of $(n_samples)")
     end
-    train_ixs, test_ixs = get_sample_ixs(s)
+    train_ixs, test_ixs = train_test_ixs[s]
 
     fit!(train_ixs, y_perm_ixs[train_ixs, s], s)
 
@@ -176,25 +176,24 @@ function runPerms(n_perms; sample_size=50)
   runClass(n_perms, y_perm_ixs=Nullable(y_perm_ixs))
 end
 
-
+typealias Inds Vector{Int64}
 function samplesGen(cvg::CrossValGenerator,
                         sample_size::Int64)
 
   all_samples = 1:sample_size
 
-  typealias Inds Vector{Int64}
-  typealias TrainTestInds Tuple{Inds, Inds}
-  cached_ixs::Array{TrainTestInds} = map(cvg) do train_ixs
+  ixs::Array{Inds} = map(cvg) do train_ixs
     test_ixs = setdiff(all_samples, train_ixs)
 
     train_ixs, test_ixs
   end
 
-  sample_ix::Int64 -> cached_ixs[sample_ix]
+  ixs
 end
 
 
 function runClass(n_samples::Int64;
+  y_col::Symbol=:adw_diff_wps,
   cvg_factory=stratifiedRandomSubFactory,
   find_c_cvg_factory=looFactory,
   y_perm_ixs::Nullable{Matrix{Int64}}=Nullable{Matrix{Int64}}())
@@ -208,20 +207,22 @@ function runClass(n_samples::Int64;
 
   common_ids = getCommonIds([conn_di, lesion_di])
   x_conn, x_lesion, y = begin
+    conn_full = getFull(conn_di)
+    lesion_full = getFull(lesion_di)
 
-    x_conn, y_conn = getXyMat(conn_di, common_ids)
-    x_lesion, y_lesion = getXyMat(lesion_di, common_ids)
+    x_conn = conn_full[getPredictors(conn_di)] |> Matrix
+    x_lesion = lesion_full[getPredictors(lesion_di)] |> Matrix
 
-    @assert y_conn == y_lesion
+    @assert conn_full[y_col] == lesion_full[y_col]
 
-    x_conn, x_lesion, y_conn
+    x_conn, x_lesion, conn_full[y_col] |> Vector
   end
 
   x_map = Dict{DataSet, Matrix}(conn=>x_conn, lesion=>x_lesion)
 
   sample_size = length(y)
 
-  get_sample_ixs = @> n_samples cvg_factory(.8, y) samplesGen(sample_size)
+  train_test_ixs = @> n_samples cvg_factory(.8, y) samplesGen(sample_size)
 
   function catPipeline(X, y, on_continuous_pred_calc=(arr, ixs, p)->())
     pipe = svrPipeline(X, y)
@@ -248,7 +249,7 @@ function runClass(n_samples::Int64;
       y,
       catPipeline(x, y, updatePredsMap!),
       get_C!,
-      get_sample_ixs,
+      train_test_ixs,
       n_samples=n_samples,
       y_perm_ixs=get(y_perm_ixs, repmat(1:length(y), 1, n_samples))
       )
@@ -289,7 +290,8 @@ function runClass(n_samples::Int64;
   ret[:coefs] = Dict(:conn => coefs_conn, :lesion => coefs_lesion)
 
   ret[:ids] = common_ids
-  ret[:get_sample_ixs] = get_sample_ixs
+
+  ret[:train_test_ixs] = train_test_ixs
 
   ret
 end
@@ -347,17 +349,15 @@ function coefsTable(run_class_ret, k::Symbol, target=diff_wps)
 end
 
 
-function saveRunClass(run_class_ret::Dict;
-  target::Target=diff_wps,
-  score_fn::Symbol=:accuracies,
-  prefix::ASCIIString="")
+function saveRunClass(run_class_ret::Dict,
+  dir_name::ASCIIString="")
 
-  datasetToDataInfo(ds::DataSet) = DataInfo(
-    adw, target, all_subjects, left_select2, ds)
+  dest_dir = begin
+    par_dir = @> data_dir() joinpath("step4", "svr_classify")
+    joinpath(dest_dir, dirname)
+  end
 
-  dest_dir = @> data_dir() joinpath("step4", "svr_classify")
-  destF(f_name) = joinpath(dest_dir,
-    isempty(prefix) ?  f_name : "$(prefix)_$(f_name)")
+  destF(f_name) = joinpath(dest_dir, f_name)
 
   for (k, v) in run_class_ret[:accuracies]
     @> "accuracies_$(k).csv" destF writecsv(v)
