@@ -11,133 +11,80 @@ using PValueAdjust
 @everywhere include("svrPipe.jl")
 
 
-function calcScoresGen(pipe::Pipeline,
-  cvg::CrossValGenerator,
-  call_test::Bool=true)
-
-  n_samples = length(cvg)
-  n_subjects = length(pipe.truths)
-
-  test(_, ixs::Vector{Int64}) = call_test ? pipeTest(pipe, ixs) : -1.
-
-  function calcScores(C::Float64)
-    paramState!(pipe, :C => C)
-
-    train_scores = zeros(Float64, n_samples)
-    fit_call_count::Int64 = 0
-    fit(ixs::IXs) = begin
-      fit_call_count += 1
-      pipeFit!(pipe, ixs)
-
-      train_scores[fit_call_count] = pipeTest(pipe, ixs)
-    end
-
-    test_scores = cross_validate(fit, test, n_subjects, cvg)
-
-    debug(@sprintf "C: %3.2e, test mean: %3.2e test T: %3.2e, train mean: %3.2e" C mean(test_scores) OneSampleTTest(test_scores).t mean(train_scores))
-
-    test_scores, train_scores
-  end
-end
-
-
-function findOptimumC!(pipe::Pipeline, cvg_factory::Function;
-                      score_train_scores::Function = mean,
-                      score_test_scores::Function = arr -> OneSampleTTest(arr).t,
+@everywhere function findOptimumC!(pipe::Pipeline, cvg_factory::Function;
+                      eval_scores::Function = arr -> OneSampleTTest(arr).t,
                       c_grid::AbstractVector = [logspace(-6, 2, 9); logspace(-6, 2, 9).*5]
                       )
-  function calcSampleScoresGen(n_samples, train_ratio)
-    cvg = cvg_factory(n_samples, train_ratio, pipe.truths)
-    calcScoresGen(pipe, cvg)
-  end
+  n_samples = 30
+  train_ratio = .8
+  cvg = cvg_factory(n_samples, train_ratio, pipe.truths)
 
-  calc30Scores = calcSampleScoresGen(30, .8)
-  testScore(C::Float64) = calc30Scores(C)[1] |> score_test_scores
+  state_combos = stateCombos(:C => c_grid)
+  test_evals = state_combos |> length |> zeros
+  updateTestEvals! = (_, test_scores, a, ix) -> test_evals[ix] = eval_scores(test_scores)
 
-  C::Float64 = @>> c_grid begin
-    map(c -> (c, testScore(c)))
-    sort(by=ct -> ct[2], rev=true)
-    map(ct -> ct[1])
-    first
-  end
+  _, _, combos = evalModel(pipe, cvg, state_combos, on_combo_complete=updateTestEvals!)
 
-  info(@sprintf "best C: %3.2e, with t: %3.2e, for dataset %s" C -1 * testScore(C) d)
+  combos_sorted = combos[sortperm(test_evals)]
+
+  C =  combos_sorted[end][:C]
+
+  info(@sprintf "best C: %3.2e, with t: %3.2e" C maximum(test_evals) )
 
   C
 end
 
 
-typealias DataSetMap Dict{DataSet, Float64}
-
+typealias Inds Vector{Int64}
 function runPipeline(X::Matrix,
                   y::Vector,
-                  pipe::Pipeline,
+                  pipe_factory::Function,
                   get_C::Function,
-                  train_test_ixs::Vector{TrainTestInds};
+                  train_ixs_array;
                   y_perm_ixs::Matrix = repmat(1:length(y), 1, n_samples),
                   n_samples::Int64=1000)
 
-  coefficients = zeros(Float64, size(X, 2), n_samples)
-
-  function fit!(x_train_ixs, y_train_ixs, sample_ix)
-    X_fit, y_fit = X[x_train_ixs, :], y[y_train_ixs]
-    C = get_C(X_fit, y_fit, sample_ix)
-
-    paramState!(pipe, :C => C)
-    pipeFit!(pipe, x_train_ixs, y_train_ixs)
-  end
-
-  test(x_test_ixs, y_test_ixs) = pipeTest(pipe, x_test_ixs, y_test_ixs)
+  coefficients = SharedArray(Float64, size(X, 2), n_samples)
+  cs = SharedArray(Float64, n_samples)
 
   prev_show = 0
-  scores::Vector{Float64} = map(1:n_samples) do s::Int64
+  all_ixs = 1:length(y)
+  scores::Vector{Float64} = pmap(1:n_samples) do s::Int64
+    pipe = pipe_factory(X, y, s)
+
+    function fit!(x_train_ixs, y_train_ixs)
+      X_fit, y_fit = X[x_train_ixs, :], y[y_train_ixs]
+      c = get_C(X_fit, y_fit)
+      @show c
+      cs[s] = c
+
+      paramState!(pipe, :C => cs[s])
+      pipeFit!(pipe, x_train_ixs, y_train_ixs)
+    end
+
     if (s - prev_show)/n_samples > .1
       prev_show = s
       println("at $s out of $(n_samples)")
     end
-    train_ixs, test_ixs = train_test_ixs[s]
 
-    fit!(train_ixs, y_perm_ixs[train_ixs, s], s)
+    train_ixs = train_ixs_array[s]
+    test_ixs = setdiff(all_ixs, train_ixs)
+
+    fit!(train_ixs, y_perm_ixs[train_ixs, s])
 
     coefs = paramState(pipe, :classifier)[:coef_]
     variant_features = paramState(pipe, :variant_features)
     coefficients[variant_features, s] = coefs
 
-    test(test_ixs, y_perm_ixs[test_ixs, s])
+    pipeTest(pipe, test_ixs, y_perm_ixs[test_ixs, s])
   end
+  @show scores
 
-  scores, coefficients
+  scores, coefficients, cs
 end
 
 
-type State
-  cs::Vector{Float64}
-  getrepixs::Function
-end
-
-State(n_samples::Int64) = State(
-  zeros(Float64, n_samples),
-  i::Int64 -> error("not set yet")
-)
-
-
-function findOptimumCandUpdateStateGen(state::State,
-    pipe_factory::Function, cvg_factory::Function)
-
-  updateState!(sample_ix::Int64, C::Float64) = state.cs[sample_ix] = C
-
-  function findOptimumCandUpdateState(X::Matrix, y::Vector, sample_ix::Int64)
-    pipe = pipe_factory(X, y)
-
-    C::Float64 = findOptimumC!(pipe, cvg_factory)
-
-    updateState!(sample_ix, C)
-    C
-  end
-end
-
-
-function calcEnsemble(preds_lesion::Matrix, preds_conn::Matrix, truths::Vector;
+function calcEnsemble(preds_lesion::AbstractMatrix, preds_conn::AbstractMatrix, truths::Vector;
   weights::Dict{DataSet, Float64} = Dict(lesion=>.5, conn=>.5))
 
   @assert size(preds_conn) == size(preds_lesion)
@@ -163,8 +110,8 @@ function calcEnsemble(preds_lesion::Matrix, preds_conn::Matrix, truths::Vector;
 end
 
 
-looFactory(n_samples, train_ratio, ys) = @> ys length LOOCV
-stratifiedRandomSubFactory(n_samples, train_ratio, ys) = StratifiedRandomSub(
+@everywhere looFactory(n_samples, train_ratio, ys) = @> ys length LOOCV
+@everywhere stratifiedRandomSubFactory(n_samples, train_ratio, ys) = StratifiedRandomSub(
   ys .> 0, round(Int64, length(ys) * train_ratio), n_samples)
 
 
@@ -176,30 +123,11 @@ function runPerms(n_perms; sample_size=50)
   runClass(n_perms, y_perm_ixs=Nullable(y_perm_ixs))
 end
 
-typealias Inds Vector{Int64}
-function samplesGen(cvg::CrossValGenerator,
-                        sample_size::Int64)
-
-  all_samples = 1:sample_size
-
-  ixs::Array{Inds} = map(cvg) do train_ixs
-    test_ixs = setdiff(all_samples, train_ixs)
-
-    train_ixs, test_ixs
-  end
-
-  ixs
-end
-
 
 function runClass(n_samples::Int64;
   y_col::Symbol=:adw_diff_wps,
   cvg_factory=stratifiedRandomSubFactory,
-  find_c_cvg_factory=looFactory,
   y_perm_ixs::Nullable{Matrix{Int64}}=Nullable{Matrix{Int64}}())
-
-  state_map::Dict{DataSet, State} = Dict{DataSet, State}(
-    conn => State(n_samples), lesion => State(n_samples))
 
   conn_di, lesion_di = map([conn, lesion]) do ds::DataSet
     DataInfo(adw, diff_wps, all_subjects, left_select2, ds)
@@ -222,7 +150,7 @@ function runClass(n_samples::Int64;
 
   sample_size = length(y)
 
-  train_test_ixs = @> n_samples cvg_factory(.8, y) samplesGen(sample_size)
+  train_ixs_array::Vector{Inds} = cvg_factory(n_samples, .8, y) |> collect
 
   function catPipeline(X, y, on_continuous_pred_calc=(arr, ixs, p)->())
     pipe = svrPipeline(X, y)
@@ -232,34 +160,35 @@ function runClass(n_samples::Int64;
       )
   end
 
-  initPreds() = repmat([NaN], sample_size, n_samples)
+  initPreds() = @>> n_samples repmat(Float64[NaN], sample_size) convert(SharedArray)
 
-  continuous_preds_map = Dict{DataSet, Matrix}(conn => initPreds(),
+  continuous_preds_map = Dict{DataSet, SharedArray}(conn => initPreds(),
     lesion=>initPreds())
 
-  function preds(ds::DataSet)
-    state = state_map[ds]
-    get_C! = findOptimumCandUpdateStateGen(state, catPipeline, find_c_cvg_factory)
+  function preds(ds::DataSet, find_c_cvg_factory)
+    get_c(X_fit, y_fit) = findOptimumC!(catPipeline(X_fit, y_fit),
+      find_c_cvg_factory)
 
-    updatePredsMap!(preds, ixs, p) = continuous_preds_map[ds][ixs, p] = preds
+    updatePredsMapGen!(s) = (preds, ixs, p) -> continuous_preds_map[ds][ixs, s] = preds
 
     x::Matrix = x_map[ds]
 
     runPipeline(x,
       y,
-      catPipeline(x, y, updatePredsMap!),
-      get_C!,
-      train_test_ixs,
+      (x, y, s) -> catPipeline(x, y, updatePredsMapGen!(s)),
+      get_c,
+      train_ixs_array,
       n_samples=n_samples,
       y_perm_ixs=get(y_perm_ixs, repmat(1:length(y), 1, n_samples))
       )
   end
 
   println("predicting lesion")
-  accuracies_lesion, coefs_lesion = preds(lesion)
+  accuracies_lesion, coefs_lesion, cs_lesion = preds(lesion, stratifiedRandomSubFactory)
+  @show cs_lesion
 
   println("predicting connectivity")
-  accuracies_conn, coefs_conn = preds(conn)
+  accuracies_conn, coefs_conn, cs_conn = preds(conn, looFactory)
 
   ret = Dict()
   ret[:preds_continuous] = Dict(:conn => continuous_preds_map[conn],
@@ -286,12 +215,12 @@ function runClass(n_samples::Int64;
   end
 
   ret[:accuracies] = Dict(:ens => accuracies_55, :conn => accuracies_conn, :lesion => accuracies_lesion)
-  ret[:state] = Dict(conn_di => state_map[conn], lesion_di => state_map[lesion])
+  ret[:cs] = Dict(:conn => cs_conn, :lesion => cs_lesion)
   ret[:coefs] = Dict(:conn => coefs_conn, :lesion => coefs_lesion)
 
   ret[:ids] = common_ids
 
-  ret[:train_test_ixs] = train_test_ixs
+  ret[:train_ixs_array] = train_ixs_array
 
   ret
 end
@@ -349,12 +278,11 @@ function coefsTable(run_class_ret, k::Symbol, target=diff_wps)
 end
 
 
-function saveRunClass(run_class_ret::Dict,
-  dir_name::ASCIIString="")
+function saveRunClass(run_class_ret::Dict, dir_name::ASCIIString)
 
   dest_dir = begin
     par_dir = @> data_dir() joinpath("step4", "svr_classify")
-    joinpath(dest_dir, dirname)
+    joinpath(dest_dir, dir_name)
   end
 
   destF(f_name) = joinpath(dest_dir, f_name)
@@ -363,8 +291,8 @@ function saveRunClass(run_class_ret::Dict,
     @> "accuracies_$(k).csv" destF writecsv(v)
   end
 
-  for (di::DataInfo, s::State) in run_class_ret[:state]
-    @> "cs_$(di).csv" destF writecsv(s.cs)
+  for (k, cs) in run_class_ret[:cs]
+    @> "cs_$(k).csv" destF writecsv(cs)
   end
 
   for (k, v) in run_class_ret[:preds_continuous]

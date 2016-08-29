@@ -100,7 +100,7 @@ function pipeTest(pipe::Pipeline, x_ixs::IXs, y_ixs::IXs)
 end
 
 
-function trainTestPreds(pipe::Pipeline, cvg::CrossValGenerator)
+@everywhere function trainTestPreds(pipe::Pipeline, cvg::CrossValGenerator)
   num_iterations = length(cvg)
   num_samples = length(pipe.truths)
 
@@ -159,15 +159,13 @@ function stateCombos(ei...)
 end
 
 
-function meanTrainTest{T <: AbstractVector}(train::T, test::T)
-  (mean(train), mean(test))
-end
+meanTrainTest{T <: AbstractVector}(train::T, test::T) = mean(train), mean(test)
 
 
 doNothing(train_scores::Vector, test_scores::Vector, preds::Vector, combo_ix::Int64) = ()
 
 
-function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
+@everywhere function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
     on_combo_complete::Function=doNothing,
     states...)
   state_combos::Combos = stateCombos(states...)
@@ -175,13 +173,12 @@ function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
 end
 
 
-function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
+@everywhere function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
     state_combos::Combos;
     on_combo_complete::Function=doNothing)
 
   scores::Vector{Tuple} = map(state_combos |> enumerate) do comboix_combo
     combo_ix::Int64, combo::ModelState = comboix_combo
-
     modelState!(pipe, combo)
     train_scores, test_scores, preds = trainTestPreds(pipe, cvg)
 
@@ -195,6 +192,24 @@ function evalModel(pipe::Pipeline, cvg::CrossValGenerator,
 
   train_scores, test_scores, state_combos
 end
+
+
+function evalModelParallel(X, y, pipe_factory::Function, cvg_factory::Function,
+    state_combos::Combos;
+    on_combo_complete::Function=doNothing)
+
+  scores = pmap(state_combos) do c
+    trains, tests, model = evalModel(pipe_factory(X, y), cvg_factory(y), [c])
+    trains[1], tests[1], model[1]
+  end
+
+  train_scores = Float64[s[1] for s in scores]
+  test_scores = Float64[s[2] for s in scores]
+  combos = ModelState[s[3] for s in scores]
+
+  train_scores, test_scores, combos
+end
+
 
 
 stringifyLabels(labels::Vector{ModelState}) = map(labels) do m::ModelState
