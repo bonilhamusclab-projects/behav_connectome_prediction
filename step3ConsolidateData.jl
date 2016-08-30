@@ -126,6 +126,8 @@ function calcWpsDiff!(y::DataFrame, outcome::ASCIIString)
   y[o_diff_wps] = y[se_o_wps] - y[pd_o_wps]
   y[o_diff_wps_picnic] = y[se_o_wps] - y[pd_o_wps_picnic]
 
+  y[symbol(o_diff_wps, 2)] = y[symbol(:se_, outcome)]./41.7 - y[pd_o_wps]
+
   y
 end
 
