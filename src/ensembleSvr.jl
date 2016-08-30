@@ -78,7 +78,6 @@ function runPipeline(X::Matrix,
 
     pipeTest(pipe, test_ixs, y_perm_ixs[test_ixs, s])
   end
-  @show scores
 
   scores, coefficients, cs
 end
@@ -94,6 +93,9 @@ function calcEnsemble(preds_lesion::AbstractMatrix, preds_conn::AbstractMatrix, 
   preds = repmat([NaN], size(preds_conn)...)
   r2s = zeros(Float64, n_samples)
 
+  preds_binary = repmat([NaN], size(preds_conn)...)
+  accuracies = zeros(Float64, n_samples)
+
   for s in 1:n_samples
     lesion_ixs = [!isnan(i) for i in preds_lesion[:, s]]
     conn_ixs = [!isnan(i) for i in preds_conn[:, s]]
@@ -103,10 +105,14 @@ function calcEnsemble(preds_lesion::AbstractMatrix, preds_conn::AbstractMatrix, 
     preds[conn_ixs, s] = preds_lesion[lesion_ixs, s] .* weights[lesion] +
       preds_conn[conn_ixs, s] .* weights[conn]
 
+    preds_binary[conn_ixs, s] = preds[conn_ixs, s] .> 0
+
     r2s[s] = r2score(truths[conn_ixs], preds[conn_ixs, s])
+    accuracies[s] = accuracy(truths[conn_ixs] .> 0,
+      [i  > 0 for i  in preds_binary[conn_ixs, s]])
   end
 
-  r2s, preds
+  r2s, preds, accuracies, preds_binary
 end
 
 
@@ -127,6 +133,7 @@ end
 function runClass(n_samples::Int64;
   y_col::Symbol=:adw_diff_wps,
   cvg_factory=stratifiedRandomSubFactory,
+  train_ixs_array::Nullable{Vector{Inds}} = Nullable{Vector{Inds}}(),
   y_perm_ixs::Nullable{Matrix{Int64}}=Nullable{Matrix{Int64}}())
 
   conn_di, lesion_di = map([conn, lesion]) do ds::DataSet
@@ -150,8 +157,6 @@ function runClass(n_samples::Int64;
 
   sample_size = length(y)
 
-  train_ixs_array::Vector{Inds} = cvg_factory(n_samples, .8, y) |> collect
-
   function catPipeline(X, y, on_continuous_pred_calc=(arr, ixs, p)->())
     pipe = svrPipeline(X, y)
     trainContinuousTestCategorical(pipe,
@@ -165,6 +170,8 @@ function runClass(n_samples::Int64;
   continuous_preds_map = Dict{DataSet, SharedArray}(conn => initPreds(),
     lesion=>initPreds())
 
+  train_ixs_arr = get(train_ixs_array, cvg_factory(n_samples, .8, y) |> collect)
+
   function preds(ds::DataSet, find_c_cvg_factory)
     get_c(X_fit, y_fit) = findOptimumC!(catPipeline(X_fit, y_fit),
       find_c_cvg_factory)
@@ -177,7 +184,7 @@ function runClass(n_samples::Int64;
       y,
       (x, y, s) -> catPipeline(x, y, updatePredsMapGen!(s)),
       get_c,
-      train_ixs_array,
+      train_ixs_arr,
       n_samples=n_samples,
       y_perm_ixs=get(y_perm_ixs, repmat(1:length(y), 1, n_samples))
       )
@@ -185,42 +192,29 @@ function runClass(n_samples::Int64;
 
   println("predicting lesion")
   accuracies_lesion, coefs_lesion, cs_lesion = preds(lesion, stratifiedRandomSubFactory)
-  @show cs_lesion
 
   println("predicting connectivity")
   accuracies_conn, coefs_conn, cs_conn = preds(conn, looFactory)
 
+  _, preds_55, accuracies_55, _ = calcEnsemble(continuous_preds_map[lesion],
+    continuous_preds_map[conn], y)
+
   ret = Dict()
   ret[:preds_continuous] = Dict(:conn => continuous_preds_map[conn],
-    :lesion => continuous_preds_map[lesion])
+    :lesion => continuous_preds_map[lesion],
+    :ens => preds_55
+    )
 
-  accuracies_55, preds_55 = begin
-    _, preds_continous = calcEnsemble(continuous_preds_map[lesion],
-      continuous_preds_map[conn], y)
-
-    ret[:preds_continuous][:ens] = preds_continous
-
-    preds_ret = repmat([NaN], size(preds_continous)...)
-
-    accuracies_ret = map(1:n_samples) do s
-      valid_ixs = Bool[!isnan(i) for i in preds_continous[:, s]]
-
-      preds_binary = preds_continous[valid_ixs, s] .>= 0
-      preds_ret[valid_ixs, s] = preds_binary
-
-      accuracy(y[valid_ixs] .>= 0, preds_binary)
-    end
-
-    accuracies_ret, preds_ret
-  end
-
-  ret[:accuracies] = Dict(:ens => accuracies_55, :conn => accuracies_conn, :lesion => accuracies_lesion)
+  ret[:accuracies] = Dict(:conn => accuracies_conn,
+    :lesion => accuracies_lesion,
+    :ens => accuracies_55)
+    
   ret[:cs] = Dict(:conn => cs_conn, :lesion => cs_lesion)
   ret[:coefs] = Dict(:conn => coefs_conn, :lesion => coefs_lesion)
 
   ret[:ids] = common_ids
 
-  ret[:train_ixs_array] = train_ixs_array
+  ret[:train_ixs_array] = train_ixs_arr
 
   ret
 end
@@ -282,8 +276,10 @@ function saveRunClass(run_class_ret::Dict, dir_name::ASCIIString)
 
   dest_dir = begin
     par_dir = @> data_dir() joinpath("step4", "svr_classify")
-    joinpath(dest_dir, dir_name)
+    joinpath(par_dir, dir_name)
   end
+
+  mkdir(dest_dir)
 
   destF(f_name) = joinpath(dest_dir, f_name)
 
