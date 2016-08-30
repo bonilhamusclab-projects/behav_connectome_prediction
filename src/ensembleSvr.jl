@@ -221,6 +221,18 @@ function runClass(n_samples::Int64;
 end
 
 
+predsMatToScores(score_fn::Function, preds_mat::AbstractMatrix, truths) = map(1:size(preds_mat, 2)) do c
+  valid_ixs = notNanIxs(preds_mat[:, c])
+  score_fn(truths[valid_ixs], preds_mat[valid_ixs, c])
+end
+
+
+calcR2s(preds_mat::AbstractMatrix, truths) = predsMatToScores(r2s, preds_mat, truths)
+
+
+calcCors(preds_mat::AbstractMatrix, truths) = predsMatToScores(cor, preds_mat, truths)
+
+
 function calcCoefStats(coefs_df::DataFrame)
   coefs_df_long = @> coefs_df melt rename!(:variable, :predictor)
 
