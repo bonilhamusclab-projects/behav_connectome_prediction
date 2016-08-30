@@ -131,13 +131,14 @@ end
 
 
 function runClass(n_samples::Int64;
+  region::Region=left_select2,
   y_col::Symbol=:adw_diff_wps,
   cvg_factory=stratifiedRandomSubFactory,
   train_ixs_array::Nullable{Vector{Inds}} = Nullable{Vector{Inds}}(),
   y_perm_ixs::Nullable{Matrix{Int64}}=Nullable{Matrix{Int64}}())
 
   conn_di, lesion_di = map([conn, lesion]) do ds::DataSet
-    DataInfo(adw, diff_wps, all_subjects, left_select2, ds)
+    DataInfo(adw, diff_wps, all_subjects, region, ds)
   end
 
   common_ids = getCommonIds([conn_di, lesion_di])
@@ -208,7 +209,7 @@ function runClass(n_samples::Int64;
   ret[:accuracies] = Dict(:conn => accuracies_conn,
     :lesion => accuracies_lesion,
     :ens => accuracies_55)
-    
+
   ret[:cs] = Dict(:conn => cs_conn, :lesion => cs_lesion)
   ret[:coefs] = Dict(:conn => coefs_conn, :lesion => coefs_lesion)
 
