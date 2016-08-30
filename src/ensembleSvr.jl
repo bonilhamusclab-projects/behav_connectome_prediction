@@ -317,3 +317,37 @@ function saveRunClass(run_class_ret::Dict, dir_name::ASCIIString)
   @> "ids.csv" destF writecsv(run_class_ret[:ids])
 
 end
+
+
+function plotPreds(preds_mat::AbstractMatrix, title::ASCIIString, truths=truths)
+  df_lesion = DataInfo(adw, diff_wps, all_subjects, left_select2, lesion) |> getFull
+
+  perm_ixs = sortperm(truths)
+  truths_sorted = truths[perm_ixs]
+
+  subjects = df_lesion[:id][perm_ixs]
+
+  preds = preds_mat[perm_ixs, :]
+
+  pred_means = predAvg(preds)
+  pred_stds = predAgg(std, preds)
+  pred_stderrs = predStdErrs(preds)
+
+  truths_layer = layer(y=truths_sorted, x=subjects, Geom.point,
+    Theme(default_color=colorant"deepskyblue"))
+
+  ses_layer = layer(y=df_lesion[perm_ixs, :se_adw_wps], x=subjects, Geom.point,
+    Theme(default_color=colorant"red"))
+
+  pds_layer = layer(y=df_lesion[perm_ixs, :pd_adw_wps], x=subjects, Geom.point,
+    Theme(default_color=colorant"orange"))
+
+  preds_layer = layer(y=pred_means, ymin=pred_means - pred_stds, ymax=pred_means + pred_stds,
+    x=subjects, Geom.point, Geom.errorbar,
+    Theme(default_color=colorant"green"))
+
+  plot(truths_layer, preds_layer,
+    Guide.xlabel("Subject"), Guide.ylabel("WPS"),
+    Guide.title("$title, cor: $(cor(pred_means, truths_sorted))"))
+
+end
